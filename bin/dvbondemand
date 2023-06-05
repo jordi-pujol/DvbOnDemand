@@ -134,6 +134,7 @@ LoadConfig() {
 		msg="Loading configuration"
 
 	mkdir -p "${TMPDIR}"
+	rm -f "${TMPDIR}"*
 	mkdir -p -m 0755 "/run/mumudvb"
 	chown -R _mumudvb:video "/run/mumudvb"
 	[ -e "${PIPE}" ] || \
@@ -371,13 +372,13 @@ StartServer() {
 	}
 
 	eval conffile=\"\${config${config}_conffile:-}\"
-	tmpconffile="${TMPDIR}${portHttp}.conf"
+	tmpconffile="${TMPDIR}${conffile}-${portHttp}.conf"
 	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
 		-e "/^card=.*/s//card=${card}/" \
 		-e "/^tuner=.*/s//tuner=${tuner}/" \
 		< "${conffile}" > "${tmpconffile}"
 	( /usr/bin/mumudvb -d -c "${tmpconffile}" \
-		>> "${TMPDIR}log-${config}.txt" 2>&1 ) &
+		>> "${TMPDIR}log-${portHttp}.txt" 2>&1 ) &
 	pid=${!}
 	pidsChildren="${pidsChildren}${pid}${TAB}"
 	_applog "Info: starting mumudvb server ${portHttp}"
