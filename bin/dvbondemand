@@ -1,0 +1,473 @@
+#!/bin/bash
+
+#  dvbondemand
+#
+#  Gets audio/video services from several dvb cards.
+#  Starts mumudvb servers on clients demand.
+#  Stops these servers when idle.
+#
+#  dvbondemand detects when a service is required and therefore
+#  starts mumudvb sessions using an available dvb adapter.
+#  In few seconds clients will get the corresponding http video/audio stream.
+#  Also, ends the mumudvb server session after client disconnection.
+#
+#  $Revision: 1.3 $
+#
+#  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 3, or (at your option)
+#  any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#************************************************************************
+
+_trim() {
+	printf '%s\n' "${@}" | \
+	sed -re "/^[[:blank:]]+|[[:blank:]]+$/s///g"
+}
+
+_pids_active() {
+	local pids="${pidsChildren}" \
+		pid
+	pidsChildren=""
+	for pid in ${pids}; do
+		if kill -s 0 ${pid} 2> /dev/null; then
+			pidsChildren="${pidsChildren}${pid}${TAB}"
+		else
+			wait ${pid} 2> /dev/null || :
+		fi
+	done
+}
+
+_ps_children() {
+	local ppid=${1:-${$}} \
+		excl="${2:-"0"}" \
+		pid
+	for pid in $(pgrep -P ${ppid} | \
+	grep -svwEe "${excl}"); do
+		_ps_children ${pid} "${excl}"
+		pidsChildren="${pidsChildren}${pid}${TAB}"
+	done
+}
+
+_UTCseconds() {
+	date +'%s' "${@}"
+}
+
+_datetime() {
+	date +'%F %T' "${@}"
+}
+
+_applog() {
+	local msg="${@}"
+	printf '%s\n' "$(_datetime) ${msg}" >> "${LOGFILE}"
+}
+
+PreBackupRotate() {
+	local f d=$(_UTCseconds)
+	for f in "${LOGFILE}" "${LOGFILE}.xtrace"; do
+		[ ! -f "${f}" ] || \
+			mv -f "${f}" "${f}_${d}"
+	done
+}
+
+BackupRotate() {
+	local f t
+	find "$(dirname "${LOGFILE}")" -maxdepth 1 \
+	-name "$(basename "${LOGFILE}")_*" | \
+	sort | \
+	head -qn -${LogRotate} | \
+	while IFS="_" read -r f t; do
+		rm -f "${LOGFILE}_${t}" "${LOGFILE}.xtrace_${t}"
+	done
+}
+
+RuleInsert() {
+	local portHttp="${1}"
+	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp})" ] || \
+		_applog "Err: adding log-port ${portHttp}" \
+			"when server is already active"
+	iptables -4 --wait -I INPUT -p tcp -m tcp \
+		--dport ${portHttp} -m state --state NEW \
+		-m limit --limit 1/min \
+		-j LOG --log-level info --log-prefix "${NEWREQUEST}${portHttp}"
+	[ -z "${Debug}" ] || \
+		_applog "Info: adding log-port ${portHttp}"
+}
+
+RuleClean() {
+	local portHttp="${1:-".*"}" \
+		rule n=1
+	while :; do
+		rule="$(iptables -4 --wait --list INPUT ${n})" && \
+		[ -n "${rule}" ] || \
+			break
+		if grep -qs \
+		-e "LOG level info prefix \"${NEWREQUEST}${portHttp}\"" <<< "${rule}"; then
+			iptables -4 --wait --delete INPUT ${n}
+			[ -z "${Debug}" ] || \
+				_applog "Info: deleting log port ${portHttp}"
+			n=1
+		else
+			let "n++,1"
+		fi
+	done
+}
+
+ListStatus() {
+	set | awk \
+		'/^(adapter|config)[[:digit:]]*_|^PortHttp|^LogRotate/ {print}' \
+		> "${STAT}"
+}
+
+LoadConfig() {
+	local config service name data conffile line ind \
+		msg="Loading configuration"
+
+	mkdir -p "${TMPDIR}"
+	mkdir -p -m 0755 "/run/mumudvb"
+	chown -R _mumudvb:video "/run/mumudvb"
+	[ -e "${PIPE}" ] || \
+		mkfifo "${PIPE}"
+
+	ReloadConfig="y"
+	# config variables, default values
+	Debug=""
+	PortHttp=4000
+	LogRotate=3
+
+	UpdateReport="y"
+	Msgs=""
+	MsgsInfo=""
+	Adapters=${NONE}
+	Configs=${NONE}
+	rm -f "${STAT}"
+	PreBackupRotate
+	exec >> "${LOGFILE}" 2>&1
+	_applog "${msg}"
+
+	[ ! -s "/etc/default/${NAME}" ] || \
+		. "/etc/default/${NAME}"
+
+	! printf '%s\n' "${@}" | grep -qsxiF 'debug' || \
+		Debug="y"
+	! printf '%s\n' "${@}" | grep -qsxiF 'xtrace' || \
+		Debug="xtrace"
+	set +o xtrace
+	if [ "${Debug}" = "xtrace" ]; then
+		export PS4='+\t ${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
+		exec {BASH_XTRACEFD}>> "${LOGFILE}.xtrace"
+		set -o xtrace
+	fi
+
+	[ -n "${Debug}" ] && \
+		DevNull="${LOGFILE}" || \
+		DevNull="/dev/null"
+
+	BackupRotate
+	RuleClean
+
+	unset $(set | awk -F '=' \
+		'$1 ~ /^(adapter|config)[[:digit:]]*_/ {print $1}') 2> /dev/null || :
+	ind=0
+	while read -r line; do
+		case "${ind}" in
+		0)
+			data="$(sed -nr \
+			-e '/Info:[ ]+DVB:[ =]+Card ([[:digit:]]+) - Tuner ([[:digit:]]+) [=]+/{s//\1 \2/;p;q}' \
+			-e '${q1}' <<< "${line}")" || \
+				continue
+			let "Adapters++,1"
+			eval adapter${Adapters}_card='${data%% *}'
+			eval adapter${Adapters}_tuner='${data##* }'
+			let "ind++,1"
+			;;
+		1)
+			if data="$(sed -nr \
+			-e '/Info:  DVB:   Frontend : ([[:alnum:]]+)/{s//\1/;p;q}' \
+			-e '${q1}' <<< "${line}")"; then
+				eval adapter${Adapters}_name='$(_trim "${data}")'
+				let "ind++,1"
+			else
+				ind=0
+			fi
+			;;
+		2)
+			if data="$(sed -nr \
+			-e '/Info:  DVB:[[:blank:]]+([^[:blank:]].*)/{s//\1/;p;q}' \
+			-e '${q1}' <<< "${line}")"; then
+				case "$(_trim "${data}")" in
+				Terrestrial*) data="dvbt" ;;
+				Satellite*) data="dvbs" ;;
+				Cable*) data="dvbc" ;;
+				ATSC*) data="atsc" ;;
+				*) ind=0; continue ;;
+				esac
+				eval adapter${Adapters}_dvbtype='${data}'
+				let "ind++,1"
+			else
+				ind=0
+			fi
+			;;
+		3)
+			if data="$(sed -nr \
+			-e '/Info:  DVB:   Frequency: ([[:digit:]]+) kHz to ([[:digit:]]+) kHz/{s//\1 \2/;p;q}' \
+			-e '${q1}' <<< "${line}")"; then
+				eval adapter${Adapters}_freqmin='${data%% *}'
+				eval adapter${Adapters}_freqmax='${data##* }'
+			fi
+			ind=0
+			;;
+		esac
+	done < <(mumudvb --list-cards 2>&1)
+
+	while read -r conffile; do
+		let "Configs++,1"
+		eval config${Configs}_conffile='${conffile}'
+		eval config${Configs}_dvbtype='$(basename "${conffile}" | cut -f 1 -s -d '_')'
+
+		name=""
+		service_id=""
+		while read -r line; do
+			case "${line}" in
+			freq=*) eval config${Configs}_freq='${line##*=}' ;;
+			name=*) name="${line##*=}" ;;
+			service_id=*) service_id="${line##*=}" ;;
+			*)
+				[ -n "${name}" -a -n "${service_id}" ] || \
+					continue
+				eval config${Configs}_service_${service_id}='${name}'
+				name=""
+				service_id=""
+				;;
+			esac
+		done < "${conffile}"
+		[ -z "${name}" -o -z "${service_id}" ] || \
+			eval config${Configs}_service_${service_id}='${name}'
+	done < <(ls -1 /etc/mumudvb/{dvbt,dvbc,dvbs,atsc}_*.conf 2> /dev/null)
+
+	{ printf '%s\n' "#EXTM3U"
+	for config in $(seq ${Configs}); do
+		let "portHttp=PortHttp+config,1"
+		RuleInsert ${portHttp}
+		eval dvbtype=\"\${config${config}_dvbtype:-}\"
+		while read service name; do
+			printf '%s:%s,%s %s\n' \
+				"#EXTINF" "${service}" \
+				"${dvbtype}" "${name}"
+			printf '%s\n' \
+				"http://$(hostname):${portHttp}/bysid/${service}"
+		done < <(set | \
+		sed -nre "/^config${config}_service_([[:digit:]]+)=(.*)/s//\1 \2/p")
+	done
+	} > "${PLAYLIST}"
+
+	ListStatus &
+	pidsChildren="${pidsChildren}${!}${TAB}"
+
+	ReloadConfig=""
+}
+
+Watching() {
+	local pid="${1}" \
+		portHttp="${2}" \
+		c
+	[ -z "${Debug}" ] || \
+		_applog "Info: watching mumudvb server ${portHttp}"
+	# wait for daemon start, it's around 1.5 seconds on a rpi3B
+	c=100
+	while ! wget -O "${TMPDIR}playlist-${portHttp}.m3u" \
+	"http://rpi3b:${portHttp}/playlist.m3u" >> "${DevNull}" 2>&1 && \
+	let "c--"; do
+		sleep 0.10
+	done
+	if [ ${c} -eq ${NONE} ]; then
+		_applog "Err: can't start mumudvb server ${portHttp}"
+	else
+		c=3
+		[ -z "${Debug}" ] || \
+			_applog "Info: mumudvb server ${portHttp} is up"
+		# monitor communication while connected
+		while kill -s 0 ${pid} 2> /dev/null && \
+		let "c--"; do
+			sleep 5
+			[ -z "$(ss --no-header --numeric --tcp \
+			state connected sport ${portHttp})" ] || \
+				c=3
+		done
+		# more than 15 seconds after disconnection
+		_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
+	fi
+	kill -s TERM ${pid} 2> /dev/null || :
+	wait ${pid} 2> /dev/null || :
+	sleep 1 # waiting for networking ports closed
+	RuleInsert ${portHttp}
+	echo "${WATCHEND}${portHttp}" >> "${PIPE}"
+}
+
+CleaningWatch() {
+	local portHttp="${1}" \
+		config pid
+	let "config=portHttp-PortHttp,1"
+	eval pid=\"\${config${config}_serverPid:-}\"
+	[ -z "${pid}" ] || \
+	kill -s 0 ${pid} 2> /dev/null || \
+		unset config${config}_serverPid
+	eval pid=\"\${config${config}_serverWatchPid:-}\"
+	[ -z "${pid}" ] || \
+	kill -s 0 ${pid} 2> /dev/null || \
+		unset config${config}_serverWatchPid
+	ListStatus &
+	pidsChildren="${pidsChildren}${!}${TAB}"
+}
+
+StartServer() {
+	local portHttp="${1}" \
+		pid config dvbtype adapter card tuner freq freqmin freqmax
+
+	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp} )" ] && \
+	[ 1 -le $((config=portHttp-PortHttp)) ] && \
+	[ ${config} -le ${Configs} ] || {
+		_applog "Warn: iptables does log port ${portHttp}" \
+			"when server is already active"
+		return ${OK}
+	}
+
+	RuleClean ${portHttp}
+
+	eval dvbtype=\"\${config${config}_dvbtype:-}\"
+	eval freq=\"\${config${config}_freq:-}\"
+	pid="0"
+	while read -r adapter; do
+		eval card=\"\${adapter${adapter}_card:-}\"
+		eval tuner=\"\${adapter${adapter}_tuner:-}\"
+		! pid="$(lsof -wt "/dev/dvb/adapter${card}/frontend${tuner}")" || {
+			[ -z "${Debug}" ] || \
+				_applog "Info: not selecting in use adapter${card}/frontend${tuner}"
+			continue
+		}
+		eval freqmin=\"\${adapter${adapter}_freqmin:-}\"
+		eval freqmax=\"\${adapter${adapter}_freqmax:-}\"
+		[ ${freqmin} -gt ${freq} -o  ${freq} -gt ${freqmax} ] || \
+			break
+		[ -z "${Debug}" ] || \
+			_applog "Info: frequency ${freq} out of range" \
+			"adapter${card}/frontend${tuner}"
+	done < <(set | \
+	sed -nre "/^adapter([[:digit:]]+)_dvbtype=${dvbtype}/s//\1/p")
+
+	[ -z "${pid}" ] || {
+		_applog "Warn: not available adapter for ${portHttp}"
+		return ${OK}
+	}
+
+	eval conffile=\"\${config${config}_conffile:-}\"
+	tmpconffile="${TMPDIR}${portHttp}.conf"
+	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
+		-e "/^card=.*/s//card=${card}/" \
+		-e "/^tuner=.*/s//tuner=${tuner}/" \
+		< "${conffile}" > "${tmpconffile}"
+	( /usr/bin/mumudvb -d -c "${tmpconffile}" \
+		>> "${TMPDIR}log-${config}.txt" 2>&1 ) &
+	pid=${!}
+	pidsChildren="${pidsChildren}${pid}${TAB}"
+	_applog "Info: starting mumudvb server ${portHttp}"
+	eval config${config}_serverPid='${pid}'
+	Watching ${pid} ${portHttp} &
+	eval config${config}_serverWatchPid='${!}'
+	pidsChildren="${pidsChildren}${pid}${TAB}"
+	ListStatus &
+	pidsChildren="${pidsChildren}${!}${TAB}"
+}
+
+_exit() {
+	trap - EXIT INT
+	set +o errexit +o nounset -o pipefail +o noglob
+	_applog "Daemon exit"
+	printf '%s\n\n' "Daemon exit" >&2
+	RuleClean
+	pidsChildren=""; _ps_children
+	[ -z "${pidsChildren}" ] || \
+		kill -s TERM ${pidsChildren} 2> /dev/null || :
+	wait || :
+}
+
+Main() {
+	# constants
+	readonly NAME APPNAME="${NAME}" \
+		TMPDIR="/var/log/${NAME}/"
+	readonly STAT="${TMPDIR}status.txt" \
+		PIPE="${TMPDIR}pipe" \
+		LOGFILE="${TMPDIR}log.txt" \
+		PLAYLIST="${TMPDIR}playlist.m3u" \
+		IRELOAD="HUP" ISTAT="USR2" \
+		OK=0 ERR=1 \
+		LF=$'\n' TAB=$'\t' BEL=$'\x07' SPACE=' \t\n\r' \
+		NONE=0 \
+		NEWREQUEST="${NAME} new connection:"
+		WATCHEND="Watching ends:"
+	# config variables
+	local Debug PortHttp LogRotate
+	# internal variables, daemon scope
+	local ReloadConfig Adapters Configs \
+		line portHttp pidsChildren=""
+
+	trap '_exit' EXIT
+	trap 'exit' INT
+
+	LoadConfig || \
+		exit 1
+
+	trap '[ -n "${ReloadConfig}" ] || { ReloadConfig="y"; }' "${IRELOAD}"
+	trap 'ListStatus' "${ISTAT}"
+
+	journalctl --since="@$(_UTCseconds)" \
+		--follow "--grep=${NEWREQUEST}" --output=cat | \
+		cat - >> "${PIPE}" &
+
+	while :; do
+		if read -r line < "${PIPE}"; then
+			if portHttp="$(sed -nr \
+			-e "/.*${NEWREQUEST}([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
+			-e '${q1}' <<< "${line}")"; then
+				StartServer ${portHttp}
+			elif portHttp="$(sed -nr \
+			-e "/^${WATCHEND}([[:digit:]]+)$/{s//\1/;p;q}" \
+			-e '${q1}' <<< "${line}")"; then
+				CleaningWatch ${portHttp}
+			else
+				[ -z "${Debug}" ] || \
+					_applog "Warn: received invalid data from pipe" \
+						"${line}"
+			fi
+		else
+			[ -z "${Debug}" ] || \
+				_applog "Warn: can't read from pipe"
+		fi
+		_pids_active
+	done
+}
+
+set -o errexit -o nounset -o pipefail +o noglob +o noclobber
+
+NAME="$(basename "${0}")"
+
+case "${1:-}" in
+start)
+	shift
+	Main "${@}"
+	;;
+*)
+	echo "Wrong arguments" >&2
+	exit 1
+	;;
+esac

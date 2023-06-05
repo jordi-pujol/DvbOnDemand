@@ -1,0 +1,19 @@
+Source: dvbondemand
+Section: utils
+Priority: optional
+Maintainer: Jordi Pujol Palomer <jordipujolp@gmail.com>
+Uploaders: Jordi Pujol Palomer <jordipujolp@gmail.com>
+Build-Depends: bash,
+
+Package: dvbondemand
+Architecture: all
+Depends: ${misc:Depends},
+ systemd, bash,
+ wget, lsof, iptables,
+ mumudvb,
+Recommends:
+Suggests:
+Description: Gets audio/video services from several dvb cards.
+ On client's demand starts mumudvb servers that provide audio/video services
+ from the available DVB cards.
+ Stops these servers when they are idle.

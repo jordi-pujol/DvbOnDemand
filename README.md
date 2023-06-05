@@ -1,2 +1,8 @@
 # DvbOnDemand
-Get audio/video services from DVB cards, starting and stopping mumudvb servers on clients demand
+Gets audio/video services from several dvb cards.
+
+On client's demand starts mumudvb servers that provide audio/video services
+from the available DVB cards.
+
+Stops these servers when they are idle.
+
