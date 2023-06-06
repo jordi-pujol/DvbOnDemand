@@ -1,1 +1,2 @@
-bin/*				/usr/bin/
+bin/dvbondemand				/usr/bin/
+default/*			/etc/default/

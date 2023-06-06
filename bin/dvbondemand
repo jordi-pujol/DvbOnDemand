@@ -3,7 +3,7 @@
 #  dvbondemand
 #
 #  Gets audio/video services from several dvb cards.
-#  Starts mumudvb servers on clients demand.
+#  Starts mumudvb servers on client's request.
 #  Stops these servers when idle.
 #
 #  dvbondemand detects when a service is required and therefore
@@ -134,7 +134,8 @@ LoadConfig() {
 		msg="Loading configuration"
 
 	mkdir -p "${TMPDIR}"
-	rm -f "${TMPDIR}"*
+	rm -f "${TMPDIR}"*.{conf,m3u} "${TMPDIR}log-"*.txt
+	rm -f "${STAT}"
 	mkdir -p -m 0755 "/run/mumudvb"
 	chown -R _mumudvb:video "/run/mumudvb"
 	[ -e "${PIPE}" ] || \
@@ -151,7 +152,6 @@ LoadConfig() {
 	MsgsInfo=""
 	Adapters=${NONE}
 	Configs=${NONE}
-	rm -f "${STAT}"
 	PreBackupRotate
 	exec >> "${LOGFILE}" 2>&1
 	_applog "${msg}"
@@ -169,10 +169,6 @@ LoadConfig() {
 		exec {BASH_XTRACEFD}>> "${LOGFILE}.xtrace"
 		set -o xtrace
 	fi
-
-	[ -n "${Debug}" ] && \
-		DevNull="${LOGFILE}" || \
-		DevNull="/dev/null"
 
 	BackupRotate
 	RuleClean
@@ -234,7 +230,8 @@ LoadConfig() {
 	while read -r conffile; do
 		let "Configs++,1"
 		eval config${Configs}_conffile='${conffile}'
-		eval config${Configs}_dvbtype='$(basename "${conffile}" | cut -f 1 -s -d '_')'
+		eval config${Configs}_dvbtype='$(basename "${conffile}" | \
+			cut -f 1 -s -d '_')'
 
 		name=""
 		service_id=""
@@ -278,22 +275,25 @@ LoadConfig() {
 	ReloadConfig=""
 }
 
-Watching() {
+ServerWatch() {
 	local pid="${1}" \
 		portHttp="${2}" \
-		c
+		c playlist
 	[ -z "${Debug}" ] || \
 		_applog "Info: watching mumudvb server ${portHttp}"
 	# wait for daemon start, it's around 1.5 seconds on a rpi3B
-	c=100
-	while ! wget -O "${TMPDIR}playlist-${portHttp}.m3u" \
-	"http://rpi3b:${portHttp}/playlist.m3u" >> "${DevNull}" 2>&1 && \
+	sleep 1
+	c=20
+	playlist="${TMPDIR}playlist-${portHttp}.m3u"
+	rm -f "${playlist}"
+	while kill -s 0 ${pid} 2> /dev/null && \
+	! wget --quiet -O "${playlist}" \
+	"http://$(hostname):${portHttp}/playlist.m3u" && \
 	let "c--"; do
-		sleep 0.10
+		sleep 0.20
 	done
-	if [ ${c} -eq ${NONE} ]; then
-		_applog "Err: can't start mumudvb server ${portHttp}"
-	else
+	if kill -s 0 ${pid} 2> /dev/null && \
+	[ -s "${playlist}" ]; then
 		c=3
 		[ -z "${Debug}" ] || \
 			_applog "Info: mumudvb server ${portHttp} is up"
@@ -307,15 +307,17 @@ Watching() {
 		done
 		# more than 15 seconds after disconnection
 		_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
+	else
+		_applog "Err: can't start mumudvb server ${portHttp}"
 	fi
 	kill -s TERM ${pid} 2> /dev/null || :
 	wait ${pid} 2> /dev/null || :
-	sleep 1 # waiting for networking ports closed
+	sleep 1 # closing network ports
 	RuleInsert ${portHttp}
 	echo "${WATCHEND}${portHttp}" >> "${PIPE}"
 }
 
-CleaningWatch() {
+WatchClean() {
 	local portHttp="${1}" \
 		config pid
 	let "config=portHttp-PortHttp,1"
@@ -331,7 +333,7 @@ CleaningWatch() {
 	pidsChildren="${pidsChildren}${!}${TAB}"
 }
 
-StartServer() {
+ServerStart() {
 	local portHttp="${1}" \
 		pid config dvbtype adapter card tuner freq freqmin freqmax
 
@@ -372,20 +374,20 @@ StartServer() {
 	}
 
 	eval conffile=\"\${config${config}_conffile:-}\"
-	tmpconffile="${TMPDIR}${conffile}-${portHttp}.conf"
+	tmpconffile="${TMPDIR}$(basename "${conffile}" ".conf")-${portHttp}.conf"
 	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
 		-e "/^card=.*/s//card=${card}/" \
 		-e "/^tuner=.*/s//tuner=${tuner}/" \
 		< "${conffile}" > "${tmpconffile}"
 	( /usr/bin/mumudvb -d -c "${tmpconffile}" \
-		>> "${TMPDIR}log-${portHttp}.txt" 2>&1 ) &
+		> "${TMPDIR}log-${portHttp}.txt" 2>&1 ) &
 	pid=${!}
-	pidsChildren="${pidsChildren}${pid}${TAB}"
 	_applog "Info: starting mumudvb server ${portHttp}"
 	eval config${config}_serverPid='${pid}'
-	Watching ${pid} ${portHttp} &
-	eval config${config}_serverWatchPid='${!}'
 	pidsChildren="${pidsChildren}${pid}${TAB}"
+	ServerWatch ${pid} ${portHttp} &
+	eval config${config}_serverWatchPid='${!}'
+	pidsChildren="${pidsChildren}${!}${TAB}"
 	ListStatus &
 	pidsChildren="${pidsChildren}${!}${TAB}"
 }
@@ -414,8 +416,8 @@ Main() {
 		OK=0 ERR=1 \
 		LF=$'\n' TAB=$'\t' BEL=$'\x07' SPACE=' \t\n\r' \
 		NONE=0 \
-		NEWREQUEST="${NAME} new connection:"
-		WATCHEND="Watching ends:"
+		NEWREQUEST="${NAME} new connection:" \
+		WATCHEND="ServerWatch ends:"
 	# config variables
 	local Debug PortHttp LogRotate
 	# internal variables, daemon scope
@@ -428,7 +430,8 @@ Main() {
 	LoadConfig || \
 		exit 1
 
-	trap '[ -n "${ReloadConfig}" ] || { ReloadConfig="y"; }' "${IRELOAD}"
+	trap '[ -n "${ReloadConfig}" ] || echo "ReloadConfig" >> "${PIPE}"' \
+		"${IRELOAD}"
 	trap 'ListStatus' "${ISTAT}"
 
 	journalctl --since="@$(_UTCseconds)" \
@@ -440,19 +443,20 @@ Main() {
 			if portHttp="$(sed -nr \
 			-e "/.*${NEWREQUEST}([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				StartServer ${portHttp}
+				ServerStart ${portHttp}
 			elif portHttp="$(sed -nr \
 			-e "/^${WATCHEND}([[:digit:]]+)$/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				CleaningWatch ${portHttp}
+				WatchClean ${portHttp}
+			elif [ "${line}" = "ReloadConfig" ]; then
+				LoadConfig
 			else
 				[ -z "${Debug}" ] || \
 					_applog "Warn: received invalid data from pipe" \
 						"${line}"
 			fi
 		else
-			[ -z "${Debug}" ] || \
-				_applog "Warn: can't read from pipe"
+			_applog "Warn: can't read from pipe"
 		fi
 		_pids_active
 	done
