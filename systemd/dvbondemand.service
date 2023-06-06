@@ -1,0 +1,16 @@
+[Unit]
+Description=Gets audio/video services from several dvb cards.
+#Documentation=man:dvbondemand(1)
+After=network.target
+
+[Service]
+Type=simple
+#PIDFile=/run/dvbondemand.pid
+EnvironmentFile=-/etc/default/dvbondemand
+ExecStart=/usr/sbin/dvbondemand start
+ExecStop=/bin/kill -s SIGINT $MAINPID
+ExecReload=/bin/kill -s SIGHUP $MAINPID
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

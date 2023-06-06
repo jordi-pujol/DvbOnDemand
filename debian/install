@@ -1,2 +1,3 @@
-bin/dvbondemand				/usr/bin/
+bin/dvbondemand				/usr/sbin/
 default/*			/etc/default/
+systemd/*			/lib/systemd/system/

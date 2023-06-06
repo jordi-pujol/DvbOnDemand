@@ -69,12 +69,12 @@ _datetime() {
 
 _applog() {
 	local msg="${@}"
-	printf '%s\n' "$(_datetime) ${msg}" >> "${LOGFILE}"
+	printf '%s\n' "$(_datetime) ${msg}" >> "${LOG}"
 }
 
 PreBackupRotate() {
 	local f d=$(_UTCseconds)
-	for f in "${LOGFILE}" "${LOGFILE}.xtrace"; do
+	for f in "${LOG}" "${LOG}.xtrace"; do
 		[ ! -f "${f}" ] || \
 			mv -f "${f}" "${f}_${d}"
 	done
@@ -82,12 +82,12 @@ PreBackupRotate() {
 
 BackupRotate() {
 	local f t
-	find "$(dirname "${LOGFILE}")" -maxdepth 1 \
-	-name "$(basename "${LOGFILE}")_*" | \
+	find . -maxdepth 1 \
+	-name "${LOG}_*" | \
 	sort | \
 	head -qn -${LogRotate} | \
 	while IFS="_" read -r f t; do
-		rm -f "${LOGFILE}_${t}" "${LOGFILE}.xtrace_${t}"
+		rm -f "${LOG}_${t}" "${LOG}.xtrace_${t}"
 	done
 }
 
@@ -105,21 +105,23 @@ RuleInsert() {
 }
 
 RuleClean() {
-	local portHttp="${1:-".*"}" \
-		rule n=1
-	while :; do
-		rule="$(iptables -4 --wait --list INPUT ${n})" && \
-		[ -n "${rule}" ] || \
-			break
-		if grep -qs \
-		-e "LOG level info prefix \"${NEWREQUEST}${portHttp}\"" <<< "${rule}"; then
-			iptables -4 --wait --delete INPUT ${n}
-			[ -z "${Debug}" ] || \
-				_applog "Info: deleting log port ${portHttp}"
-			n=1
-		else
-			let "n++,1"
-		fi
+	local portHttp="${1:-}" \
+		rule n=1 d="y"
+	until [ -z "${d}" ]; do
+		d=""
+		while rule="$(iptables -4 --wait --list INPUT ${n})" && \
+		[ -n "${rule}" ]; do
+			if grep -qs \
+			-e "LOG level info prefix \"${NEWREQUEST}${portHttp:-".*"}\"" \
+			<<< "${rule}"; then
+				iptables -4 --wait --delete INPUT ${n}
+				[ -z "${Debug}" ] || \
+					_applog "Info: deleting log port ${portHttp}"
+				d="y"
+			else
+				let "n++,1"
+			fi
+		done
 	done
 }
 
@@ -133,11 +135,12 @@ LoadConfig() {
 	local config service name data conffile line ind \
 		msg="Loading configuration"
 
-	mkdir -p "${TMPDIR}"
-	rm -f "${TMPDIR}"*.{conf,m3u} "${TMPDIR}log-"*.txt
-	rm -f "${STAT}"
 	mkdir -p -m 0755 "/run/mumudvb"
 	chown -R _mumudvb:video "/run/mumudvb"
+
+	mkdir -p "${TMPDIR}"
+	cd "${TMPDIR}"
+	rm -f *.{conf,m3u} *"-log.txt" "${STAT}"
 	[ -e "${PIPE}" ] || \
 		mkfifo "${PIPE}"
 
@@ -153,7 +156,7 @@ LoadConfig() {
 	Adapters=${NONE}
 	Configs=${NONE}
 	PreBackupRotate
-	exec >> "${LOGFILE}" 2>&1
+	exec >> "${LOG}" 2>&1
 	_applog "${msg}"
 
 	[ ! -s "/etc/default/${NAME}" ] || \
@@ -166,7 +169,7 @@ LoadConfig() {
 	set +o xtrace
 	if [ "${Debug}" = "xtrace" ]; then
 		export PS4='+\t ${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
-		exec {BASH_XTRACEFD}>> "${LOGFILE}.xtrace"
+		exec {BASH_XTRACEFD}>> "${LOG}.xtrace"
 		set -o xtrace
 	fi
 
@@ -181,18 +184,19 @@ LoadConfig() {
 		0)
 			data="$(sed -nr \
 			-e '/Info:[ ]+DVB:[ =]+Card ([[:digit:]]+) - Tuner ([[:digit:]]+) [=]+/{s//\1 \2/;p;q}' \
-			-e '${q1}' <<< "${line}")" || \
+			-e '${q1}' <<< "${line}")" && \
+			[ -e "/dev/dvb/adapter${data%% *}/demux${data##* }" ] || \
 				continue
-			let "Adapters++,1"
-			eval adapter${Adapters}_card='${data%% *}'
-			eval adapter${Adapters}_tuner='${data##* }'
+			let "adapter=Adapters+1,1"
+			eval adapter${adapter}_card='${data%% *}'
+			eval adapter${adapter}_tuner='${data##* }'
 			let "ind++,1"
 			;;
 		1)
 			if data="$(sed -nr \
 			-e '/Info:  DVB:   Frontend : ([[:alnum:]]+)/{s//\1/;p;q}' \
 			-e '${q1}' <<< "${line}")"; then
-				eval adapter${Adapters}_name='$(_trim "${data}")'
+				eval adapter${adapter}_name='$(_trim "${data}")'
 				let "ind++,1"
 			else
 				ind=0
@@ -209,7 +213,7 @@ LoadConfig() {
 				ATSC*) data="atsc" ;;
 				*) ind=0; continue ;;
 				esac
-				eval adapter${Adapters}_dvbtype='${data}'
+				eval adapter${adapter}_dvbtype='${data}'
 				let "ind++,1"
 			else
 				ind=0
@@ -219,10 +223,11 @@ LoadConfig() {
 			if data="$(sed -nr \
 			-e '/Info:  DVB:   Frequency: ([[:digit:]]+) kHz to ([[:digit:]]+) kHz/{s//\1 \2/;p;q}' \
 			-e '${q1}' <<< "${line}")"; then
-				eval adapter${Adapters}_freqmin='${data%% *}'
-				eval adapter${Adapters}_freqmax='${data##* }'
+				eval adapter${adapter}_freqmin='${data%% *}'
+				eval adapter${adapter}_freqmax='${data##* }'
+				ind=0
+				let "Adapters++,1"
 			fi
-			ind=0
 			;;
 		esac
 	done < <(mumudvb --list-cards 2>&1)
@@ -284,7 +289,7 @@ ServerWatch() {
 	# wait for daemon start, it's around 1.5 seconds on a rpi3B
 	sleep 1
 	c=20
-	playlist="${TMPDIR}playlist-${portHttp}.m3u"
+	playlist="${portHttp}-playlist.m3u"
 	rm -f "${playlist}"
 	while kill -s 0 ${pid} 2> /dev/null && \
 	! wget --quiet -O "${playlist}" \
@@ -374,13 +379,13 @@ ServerStart() {
 	}
 
 	eval conffile=\"\${config${config}_conffile:-}\"
-	tmpconffile="${TMPDIR}$(basename "${conffile}" ".conf")-${portHttp}.conf"
+	tmpconffile="${portHttp}-$(basename "${conffile}")"
 	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
 		-e "/^card=.*/s//card=${card}/" \
 		-e "/^tuner=.*/s//tuner=${tuner}/" \
 		< "${conffile}" > "${tmpconffile}"
 	( /usr/bin/mumudvb -d -c "${tmpconffile}" \
-		> "${TMPDIR}log-${portHttp}.txt" 2>&1 ) &
+		> "${portHttp}-log.txt" 2>&1 ) &
 	pid=${!}
 	_applog "Info: starting mumudvb server ${portHttp}"
 	eval config${config}_serverPid='${pid}'
@@ -407,17 +412,17 @@ _exit() {
 Main() {
 	# constants
 	readonly NAME APPNAME="${NAME}" \
-		TMPDIR="/var/log/${NAME}/"
-	readonly STAT="${TMPDIR}status.txt" \
-		PIPE="${TMPDIR}pipe" \
-		LOGFILE="${TMPDIR}log.txt" \
-		PLAYLIST="${TMPDIR}playlist.m3u" \
+		TMPDIR="/var/log/${NAME}/" \
+		STAT="status.txt" \
+		PIPE="pipe" \
+		LOG="log.txt" \
+		PLAYLIST="playlist.m3u" \
 		IRELOAD="HUP" ISTAT="USR2" \
 		OK=0 ERR=1 \
 		LF=$'\n' TAB=$'\t' BEL=$'\x07' SPACE=' \t\n\r' \
 		NONE=0 \
-		NEWREQUEST="${NAME} new connection:" \
-		WATCHEND="ServerWatch ends:"
+		NEWREQUEST="${NAME}New:" \
+		WATCHEND="ServerWatch:"
 	# config variables
 	local Debug PortHttp LogRotate
 	# internal variables, daemon scope
@@ -434,14 +439,14 @@ Main() {
 		"${IRELOAD}"
 	trap 'ListStatus' "${ISTAT}"
 
-	journalctl --since="@$(_UTCseconds)" \
+	( journalctl --since="@$(_UTCseconds)" \
 		--follow "--grep=${NEWREQUEST}" --output=cat | \
-		cat - >> "${PIPE}" &
+		cat - > "${PIPE}" ) &
 
 	while :; do
 		if read -r line < "${PIPE}"; then
 			if portHttp="$(sed -nr \
-			-e "/.*${NEWREQUEST}([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
+			-e "/.*${NEWREQUEST}.*DPT=([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
 				ServerStart ${portHttp}
 			elif portHttp="$(sed -nr \
