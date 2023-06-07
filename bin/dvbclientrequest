@@ -36,7 +36,7 @@ Server="${2:-"rpi3b"}"
 D="${HOME}/dvbondemand/"
 mkdir -p "${D}"
 
-scp "${Server}://var/log/dvbondemand/playlist.m3u" \
+scp "${Server}://run/dvbondemand/playlist.m3u" \
 "${D}playlist.m3u" || {
 	echo "Err: dvbondemand is not running" >&2
 	exit 1
@@ -49,11 +49,12 @@ grep -qswF "http://${Server}:${Port}/bysid" "${D}playlist.m3u" || {
 }
 
 rm -f "${D}playlist-${Port}.m3u"
-c=3
-while ! wget --quiet -O "${D}playlist-${Port}.m3u" \
+c=4
+while sleep ${c} && \
+! wget --quiet -O "${D}playlist-${Port}.m3u" \
 "http://${Server}:${Port}/playlist.m3u" && \
 let "c--"; do
-	sleep 2
+	:
 done
 
 [ -s "${D}playlist-${Port}.m3u" ] || {

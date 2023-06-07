@@ -356,7 +356,7 @@ StartServer() {
 
 	eval dvbtype=\"\${config${config}_dvbtype:-}\"
 	eval freq=\"\${config${config}_freq:-}\"
-	pid="0"
+	pid=0
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
@@ -369,6 +369,7 @@ StartServer() {
 		eval freqmax=\"\${adapter${adapter}_freqmax:-}\"
 		[ ${freqmin} -gt ${freq} -o  ${freq} -gt ${freqmax} ] || \
 			break
+		pid=0
 		[ -z "${Debug}" ] || \
 			_applog "Info: frequency ${freq} out of range" \
 			"adapter${card}/frontend${tuner}"
@@ -420,9 +421,7 @@ Main() {
 		LOG="log.txt" \
 		PLAYLIST="playlist.m3u" \
 		IRELOAD="HUP" ISTAT="USR2" \
-		OK=0 ERR=1 \
-		LF=$'\n' TAB=$'\t' BEL=$'\x07' SPACE=' \t\n\r' \
-		NONE=0 \
+		OK=0 ERR=1 TAB=$'\t' NONE=0 \
 		NEWREQUEST="${NAME}New:" \
 		WATCHEND="CleanConfig:" \
 		RELOAD="ReloadConfig"
