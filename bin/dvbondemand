@@ -98,7 +98,7 @@ RuleInsert() {
 			"when server is already active"
 	iptables -4 --wait -I INPUT -p tcp -m tcp \
 		--dport ${portHttp} -m state --state NEW \
-		-m limit --limit 1/min \
+		-m limit --limit 5/min \
 		-j LOG --log-level info --log-prefix "${NEWREQUEST}${portHttp}"
 	[ -z "${Debug}" ] || \
 		_applog "Info: adding log-port ${portHttp}"
@@ -106,9 +106,10 @@ RuleInsert() {
 
 RuleClean() {
 	local portHttp="${1:-}" \
-		rule n=1 d="y"
+		rule n d="y"
 	until [ -z "${d}" ]; do
 		d=""
+		n=1
 		while rule="$(iptables -4 --wait --list INPUT ${n})" && \
 		[ -n "${rule}" ]; do
 			if grep -qs \
@@ -225,9 +226,9 @@ LoadConfig() {
 			-e '${q1}' <<< "${line}")"; then
 				eval adapter${adapter}_freqmin='${data%% *}'
 				eval adapter${adapter}_freqmax='${data##* }'
-				ind=0
 				let "Adapters++,1"
 			fi
+			ind=0
 			;;
 		esac
 	done < <(mumudvb --list-cards 2>&1)
@@ -280,7 +281,7 @@ LoadConfig() {
 	ReloadConfig=""
 }
 
-ServerWatch() {
+WatchServer() {
 	local pid="${1}" \
 		portHttp="${2}" \
 		c playlist
@@ -322,7 +323,7 @@ ServerWatch() {
 	echo "${WATCHEND}${portHttp}" >> "${PIPE}"
 }
 
-WatchClean() {
+CleanConfig() {
 	local portHttp="${1}" \
 		config pid
 	let "config=portHttp-PortHttp,1"
@@ -338,13 +339,14 @@ WatchClean() {
 	pidsChildren="${pidsChildren}${!}${TAB}"
 }
 
-ServerStart() {
+StartServer() {
 	local portHttp="${1}" \
 		pid config dvbtype adapter card tuner freq freqmin freqmax
 
 	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp} )" ] && \
 	[ 1 -le $((config=portHttp-PortHttp)) ] && \
-	[ ${config} -le ${Configs} ] || {
+	[ ${config} -le ${Configs} ] && \
+	[ -z "$(eval echo \"\${config${config}_serverPid:-}\")" ] || {
 		_applog "Warn: iptables does log port ${portHttp}" \
 			"when server is already active"
 		return ${OK}
@@ -390,7 +392,7 @@ ServerStart() {
 	_applog "Info: starting mumudvb server ${portHttp}"
 	eval config${config}_serverPid='${pid}'
 	pidsChildren="${pidsChildren}${pid}${TAB}"
-	ServerWatch ${pid} ${portHttp} &
+	WatchServer ${pid} ${portHttp} &
 	eval config${config}_serverWatchPid='${!}'
 	pidsChildren="${pidsChildren}${!}${TAB}"
 	ListStatus &
@@ -412,7 +414,7 @@ _exit() {
 Main() {
 	# constants
 	readonly NAME APPNAME="${NAME}" \
-		TMPDIR="/var/log/${NAME}/" \
+		TMPDIR="/run/${NAME}/" \
 		STAT="status.txt" \
 		PIPE="pipe" \
 		LOG="log.txt" \
@@ -422,7 +424,8 @@ Main() {
 		LF=$'\n' TAB=$'\t' BEL=$'\x07' SPACE=' \t\n\r' \
 		NONE=0 \
 		NEWREQUEST="${NAME}New:" \
-		WATCHEND="ServerWatch:"
+		WATCHEND="CleanConfig:" \
+		RELOAD="ReloadConfig"
 	# config variables
 	local Debug PortHttp LogRotate
 	# internal variables, daemon scope
@@ -435,7 +438,7 @@ Main() {
 	LoadConfig || \
 		exit 1
 
-	trap '[ -n "${ReloadConfig}" ] || echo "ReloadConfig" >> "${PIPE}"' \
+	trap '[ -n "${ReloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' \
 		"${IRELOAD}"
 	trap 'ListStatus' "${ISTAT}"
 
@@ -445,15 +448,16 @@ Main() {
 
 	while :; do
 		if read -r line < "${PIPE}"; then
+			_pids_active
 			if portHttp="$(sed -nr \
 			-e "/.*${NEWREQUEST}.*DPT=([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				ServerStart ${portHttp}
+				StartServer ${portHttp}
 			elif portHttp="$(sed -nr \
 			-e "/^${WATCHEND}([[:digit:]]+)$/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				WatchClean ${portHttp}
-			elif [ "${line}" = "ReloadConfig" ]; then
+				CleanConfig ${portHttp}
+			elif [ "${line}" = "${RELOAD}" ]; then
 				LoadConfig
 			else
 				[ -z "${Debug}" ] || \
@@ -463,7 +467,6 @@ Main() {
 		else
 			_applog "Warn: can't read from pipe"
 		fi
-		_pids_active
 	done
 }
 
