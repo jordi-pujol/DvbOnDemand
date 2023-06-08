@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.3 $
+#  $Revision: 1.4 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -42,21 +42,23 @@ scp "${Server}://run/dvbondemand/playlist.m3u" \
 	exit 1
 }
 
-[ -n "${Port}" ] && \
-grep -qswF "http://${Server}:${Port}/bysid" "${D}playlist.m3u" || {
+[ -n "${Port}" ] || {
 	echo "Err: must specify a valid port" >&2
 	exit 1
 }
 
 rm -f "${D}playlist-${Port}.m3u"
 c=4
-while sleep ${c} && \
-! wget --quiet -O "${D}playlist-${Port}.m3u" \
+while ! wget --quiet -O /dev/null \
 "http://${Server}:${Port}/playlist.m3u" && \
+sleep ${c} && \
 let "c--"; do
 	:
 done
 
+sleep 4
+wget --quiet -O "${D}playlist-${Port}.m3u" \
+"http://${Server}:${Port}/playlist.m3u" || :
 [ -s "${D}playlist-${Port}.m3u" ] || {
 	echo "Err: dvb server not available" >&2
 	exit 1

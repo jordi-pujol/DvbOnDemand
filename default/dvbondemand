@@ -1,3 +1,5 @@
 #Debug=""
 #PortHttp=4000
 #LogRotate=3
+#IdleTimeout=20
+#Blacklist="0:1 1:0"

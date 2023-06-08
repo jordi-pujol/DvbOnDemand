@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.3 $
+#  $Revision: 1.4 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -33,19 +33,6 @@
 _trim() {
 	printf '%s\n' "${@}" | \
 	sed -re "/^[[:blank:]]+|[[:blank:]]+$/s///g"
-}
-
-_pids_active() {
-	local pids="${pidsChildren}" \
-		pid
-	pidsChildren=""
-	for pid in ${pids}; do
-		if kill -s 0 ${pid} 2> /dev/null; then
-			pidsChildren="${pidsChildren}${pid}${TAB}"
-		else
-			wait ${pid} 2> /dev/null || :
-		fi
-	done
 }
 
 _ps_children() {
@@ -94,14 +81,14 @@ BackupRotate() {
 RuleInsert() {
 	local portHttp="${1}"
 	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp})" ] || \
-		_applog "Err: adding log-port ${portHttp}" \
+		_applog "Err: setting port ${portHttp}" \
 			"when server is already active"
 	iptables -4 --wait -I INPUT -p tcp -m tcp \
 		--dport ${portHttp} -m state --state NEW \
 		-m limit --limit 5/min \
 		-j LOG --log-level info --log-prefix "${NEWREQUEST}${portHttp}"
 	[ -z "${Debug}" ] || \
-		_applog "Info: adding log-port ${portHttp}"
+		_applog "Info: setting port ${portHttp}"
 }
 
 RuleClean() {
@@ -117,7 +104,7 @@ RuleClean() {
 			<<< "${rule}"; then
 				iptables -4 --wait --delete INPUT ${n}
 				[ -z "${Debug}" ] || \
-					_applog "Info: deleting log port ${portHttp}"
+					_applog "Info: removing port ${portHttp}"
 				d="y"
 			else
 				let "n++,1"
@@ -128,7 +115,8 @@ RuleClean() {
 
 ListStatus() {
 	set | awk \
-		'/^(adapter|config)[[:digit:]]*_|^PortHttp|^LogRotate/ {print}' \
+		'/^(adapter|config)[[:digit:]]*_/ {print}
+		/^(Debug|PortHttp|LogRotate|IdleTimeout|Blacklist)/ {print}' \
 		> "${STAT}"
 }
 
@@ -150,6 +138,8 @@ LoadConfig() {
 	Debug=""
 	PortHttp=4000
 	LogRotate=3
+	IdleTimeout=20
+	Blacklist=""
 
 	UpdateReport="y"
 	Msgs=""
@@ -186,7 +176,7 @@ LoadConfig() {
 			data="$(sed -nr \
 			-e '/Info:[ ]+DVB:[ =]+Card ([[:digit:]]+) - Tuner ([[:digit:]]+) [=]+/{s//\1 \2/;p;q}' \
 			-e '${q1}' <<< "${line}")" && \
-			[ -e "/dev/dvb/adapter${data%% *}/demux${data##* }" ] || \
+			! grep -qswF "${data/ /:}" <<< "${Blacklist}" || \
 				continue
 			let "adapter=Adapters+1,1"
 			eval adapter${adapter}_card='${data%% *}'
@@ -275,96 +265,32 @@ LoadConfig() {
 	done
 	} > "${PLAYLIST}"
 
-	ListStatus &
-	pidsChildren="${pidsChildren}${!}${TAB}"
+	ListStatus
 
 	ReloadConfig=""
 }
 
-WatchServer() {
-	local pid="${1}" \
-		portHttp="${2}" \
-		c playlist
-	[ -z "${Debug}" ] || \
-		_applog "Info: watching mumudvb server ${portHttp}"
-	# wait for daemon start, it's around 1.5 seconds on a rpi3B
-	sleep 1
-	c=20
-	playlist="${portHttp}-playlist.m3u"
-	rm -f "${playlist}"
-	while kill -s 0 ${pid} 2> /dev/null && \
-	! wget --quiet -O "${playlist}" \
-	"http://$(hostname):${portHttp}/playlist.m3u" && \
-	let "c--"; do
-		sleep 0.20
-	done
-	if kill -s 0 ${pid} 2> /dev/null && \
-	[ -s "${playlist}" ]; then
-		c=3
-		[ -z "${Debug}" ] || \
-			_applog "Info: mumudvb server ${portHttp} is up"
-		# monitor communication while connected
-		while kill -s 0 ${pid} 2> /dev/null && \
-		let "c--"; do
-			sleep 5
-			[ -z "$(ss --no-header --numeric --tcp \
-			state connected sport ${portHttp})" ] || \
-				c=3
-		done
-		# more than 15 seconds after disconnection
-		_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
-	else
-		_applog "Err: can't start mumudvb server ${portHttp}"
-	fi
-	kill -s TERM ${pid} 2> /dev/null || :
-	wait ${pid} 2> /dev/null || :
-	sleep 1 # closing network ports
-	RuleInsert ${portHttp}
-	echo "${WATCHEND}${portHttp}" >> "${PIPE}"
-}
-
-CleanConfig() {
-	local portHttp="${1}" \
-		config pid
-	let "config=portHttp-PortHttp,1"
-	eval pid=\"\${config${config}_serverPid:-}\"
-	[ -z "${pid}" ] || \
-	kill -s 0 ${pid} 2> /dev/null || \
-		unset config${config}_serverPid
-	eval pid=\"\${config${config}_serverWatchPid:-}\"
-	[ -z "${pid}" ] || \
-	kill -s 0 ${pid} 2> /dev/null || \
-		unset config${config}_serverWatchPid
-	ListStatus &
-	pidsChildren="${pidsChildren}${!}${TAB}"
-}
-
 StartServer() {
 	local portHttp="${1}" \
-		pid config dvbtype adapter card tuner freq freqmin freqmax
-
-	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp} )" ] && \
-	[ 1 -le $((config=portHttp-PortHttp)) ] && \
-	[ ${config} -le ${Configs} ] && \
-	[ -z "$(eval echo \"\${config${config}_serverPid:-}\")" ] || {
-		_applog "Warn: iptables does log port ${portHttp}" \
-			"when server is already active"
-		return ${OK}
-	}
+		c pid config dvbtype adapter card tuner freq freqmin freqmax
 
 	RuleClean ${portHttp}
 
+	let "config=portHttp-PortHttp,1"
 	eval dvbtype=\"\${config${config}_dvbtype:-}\"
 	eval freq=\"\${config${config}_freq:-}\"
 	pid=0
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		! pid="$(lsof -wt "/dev/dvb/adapter${card}/frontend${tuner}")" || {
+		demux="/dev/dvb/adapter${card}/demux${tuner}"
+		[ -e "${demux}" ] || \
+			demux="/dev/dvb/adapter${card}/demux0"
+		if pid="$(lsof -wt "${demux}")"; then
 			[ -z "${Debug}" ] || \
-				_applog "Info: not selecting in use adapter${card}/frontend${tuner}"
+				_applog "Info: not selecting adapter${card}/demux${tuner}"
 			continue
-		}
+		fi
 		eval freqmin=\"\${adapter${adapter}_freqmin:-}\"
 		eval freqmax=\"\${adapter${adapter}_freqmax:-}\"
 		[ ${freqmin} -gt ${freq} -o  ${freq} -gt ${freqmax} ] || \
@@ -372,32 +298,51 @@ StartServer() {
 		pid=0
 		[ -z "${Debug}" ] || \
 			_applog "Info: frequency ${freq} out of range" \
-			"adapter${card}/frontend${tuner}"
+				"adapter${card}/frontend${tuner}"
 	done < <(set | \
 	sed -nre "/^adapter([[:digit:]]+)_dvbtype=${dvbtype}/s//\1/p")
 
-	[ -z "${pid}" ] || {
-		_applog "Warn: not available adapter for ${portHttp}"
-		return ${OK}
-	}
+	if [ -z "${pid}" ]; then
+		eval conffile=\"\${config${config}_conffile:-}\"
+		tmpconffile="${portHttp}-$(basename "${conffile}")"
+		sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
+			-e "/^card=.*/s//card=${card}/" \
+			-e "/^tuner=.*/s//tuner=${tuner}/" \
+			-e "/^timeout_no_diff=.*/s//timeout_no_diff=${IdleTimeout}/" \
+			< "${conffile}" > "${tmpconffile}"
 
-	eval conffile=\"\${config${config}_conffile:-}\"
-	tmpconffile="${portHttp}-$(basename "${conffile}")"
-	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
-		-e "/^card=.*/s//card=${card}/" \
-		-e "/^tuner=.*/s//tuner=${tuner}/" \
-		< "${conffile}" > "${tmpconffile}"
-	( /usr/bin/mumudvb -d -c "${tmpconffile}" \
-		> "${portHttp}-log.txt" 2>&1 ) &
-	pid=${!}
-	_applog "Info: starting mumudvb server ${portHttp}"
-	eval config${config}_serverPid='${pid}'
-	pidsChildren="${pidsChildren}${pid}${TAB}"
-	WatchServer ${pid} ${portHttp} &
-	eval config${config}_serverWatchPid='${!}'
-	pidsChildren="${pidsChildren}${!}${TAB}"
-	ListStatus &
-	pidsChildren="${pidsChildren}${!}${TAB}"
+		( /usr/bin/mumudvb -d -c "${tmpconffile}" \
+			> "${portHttp}-log.txt" 2>&1 ) &
+		pid=${!}
+		_applog "Info: starting mumudvb server ${portHttp}"
+		playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
+		rm -f "${playlist}"
+		c=5
+		while kill -s 0 ${pid} 2> /dev/null && \
+		let "c--"; do
+			sleep $((IdleTimeout/4))
+			if [ -n "$(ss --no-header --numeric --tcp \
+			state connected sport ${portHttp})" ]; then
+				c=5
+				[ -e "${playlist}" ] || \
+					wget --quiet -O "${playlist}" \
+					"http://$(hostname):${portHttp}/playlist.m3u" || :
+			fi
+		done
+		if kill -s 0 ${pid} 2> /dev/null; then
+			kill -s TERM ${pid} 2> /dev/null || :
+			_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
+		else
+			_applog "Info: mumudvb server ${portHttp} has stopped himself"
+		fi
+		wait ${pid} 2> /dev/null || :
+		sleep 1
+	else
+		_applog "Warn: another adapter not available for ${portHttp}"
+	fi
+
+	RuleInsert ${portHttp}
+	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
 
 _exit() {
@@ -423,13 +368,13 @@ Main() {
 		IRELOAD="HUP" ISTAT="USR2" \
 		OK=0 ERR=1 TAB=$'\t' NONE=0 \
 		NEWREQUEST="${NAME}New:" \
-		WATCHEND="CleanConfig:" \
+		SERVEREND="ServerEnd:" \
 		RELOAD="ReloadConfig"
 	# config variables
-	local Debug PortHttp LogRotate
+	local Debug PortHttp LogRotate IdleTimeout Blacklist
 	# internal variables, daemon scope
 	local ReloadConfig Adapters Configs \
-		line portHttp pidsChildren=""
+		line portHttp Servers=""
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -447,15 +392,27 @@ Main() {
 
 	while :; do
 		if read -r line < "${PIPE}"; then
-			_pids_active
 			if portHttp="$(sed -nr \
 			-e "/.*${NEWREQUEST}.*DPT=([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				StartServer ${portHttp}
+				if grep -qswF "${portHttp}" <<< "${Servers}" || \
+				[ -n "$(ss --no-header --numeric --tcp state all \
+				sport ${portHttp} )" ]; then
+					[ -z "${Debug}" ] || \
+						_applog "Warn: new request for already active server ${portHttp}"
+				else
+					StartServer ${portHttp} &
+					Servers="${Servers}${portHttp}${TAB}"
+					ListStatus
+				fi
 			elif portHttp="$(sed -nr \
-			-e "/^${WATCHEND}([[:digit:]]+)$/{s//\1/;p;q}" \
+			-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				CleanConfig ${portHttp}
+				Servers="$(awk -v portHttp="${portHttp}" \
+					'BEGIN{RS="\t"; ORS="\t"}
+					$1 != portHttp {print}' \
+					<<< "${Servers}")"
+				ListStatus
 			elif [ "${line}" = "${RELOAD}" ]; then
 				LoadConfig
 			else
