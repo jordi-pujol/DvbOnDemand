@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.4 $
+#  $Revision: 1.5 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -36,11 +36,11 @@ Server="${2:-"rpi3b"}"
 D="${HOME}/dvbondemand/"
 mkdir -p "${D}"
 
-scp "${Server}://run/dvbondemand/playlist.m3u" \
-"${D}playlist.m3u" || {
-	echo "Err: dvbondemand is not running" >&2
-	exit 1
-}
+# scp "${Server}://run/dvbondemand/playlist.m3u" \
+# "${D}playlist.m3u" || {
+# 	echo "Err: dvbondemand is not running" >&2
+# 	exit 1
+# }
 
 [ -n "${Port}" ] || {
 	echo "Err: must specify a valid port" >&2
@@ -49,17 +49,21 @@ scp "${Server}://run/dvbondemand/playlist.m3u" \
 
 rm -f "${D}playlist-${Port}.m3u"
 c=4
-while ! wget --quiet -O /dev/null \
+while ! wget --quiet -O "${D}playlist-${Port}.m3u" \
 "http://${Server}:${Port}/playlist.m3u" && \
 sleep ${c} && \
 let "c--"; do
 	:
 done
 
-sleep 4
-wget --quiet -O "${D}playlist-${Port}.m3u" \
-"http://${Server}:${Port}/playlist.m3u" || :
-[ -s "${D}playlist-${Port}.m3u" ] || {
+if [ -s "${D}playlist-${Port}.m3u" ] && \
+[ $(wc -l < "${D}playlist-${Port}.m3u") -le 1 ]; then
+	sleep 4
+	wget --quiet -O "${D}playlist-${Port}.m3u" \
+	"http://${Server}:${Port}/playlist.m3u" || :
+fi
+[ -s "${D}playlist-${Port}.m3u" ] && \
+[ $(wc -l < "${D}playlist-${Port}.m3u") -gt 1 ] || {
 	echo "Err: dvb server not available" >&2
 	exit 1
 }

@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.4 $
+#  $Revision: 1.5 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -81,14 +81,14 @@ BackupRotate() {
 RuleInsert() {
 	local portHttp="${1}"
 	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp})" ] || \
-		_applog "Err: setting port ${portHttp}" \
+		_applog "Warn: will set watch on port ${portHttp}" \
 			"when server is already active"
 	iptables -4 --wait -I INPUT -p tcp -m tcp \
 		--dport ${portHttp} -m state --state NEW \
-		-m limit --limit 5/min \
+		-m limit --limit 20/min \
 		-j LOG --log-level info --log-prefix "${NEWREQUEST}${portHttp}"
 	[ -z "${Debug}" ] || \
-		_applog "Info: setting port ${portHttp}"
+		_applog "Info: watching port ${portHttp}"
 }
 
 RuleClean() {
@@ -104,7 +104,7 @@ RuleClean() {
 			<<< "${rule}"; then
 				iptables -4 --wait --delete INPUT ${n}
 				[ -z "${Debug}" ] || \
-					_applog "Info: removing port ${portHttp}"
+					_applog "Info: removing watch on port ${portHttp}"
 				d="y"
 			else
 				let "n++,1"
@@ -122,24 +122,31 @@ ListStatus() {
 
 LoadConfig() {
 	local config service name data conffile line ind \
+		card tuner \
 		msg="Loading configuration"
 
 	mkdir -p -m 0755 "/run/mumudvb"
 	chown -R _mumudvb:video "/run/mumudvb"
 
-	mkdir -p "${TMPDIR}"
-	cd "${TMPDIR}"
-	rm -f *.{conf,m3u} *"-log.txt" "${STAT}"
-	[ -e "${PIPE}" ] || \
-		mkfifo "${PIPE}"
-
 	ReloadConfig="y"
 	# config variables, default values
+	Workdir="/run/${NAME}/"
 	Debug=""
 	PortHttp=4000
 	LogRotate=3
 	IdleTimeout=20
 	Blacklist=""
+
+	[ ! -s "/etc/default/${NAME}" ] || \
+		. "/etc/default/${NAME}"
+
+	[ "${Workdir: -1}" = '/' ] || \
+		Workdir="${Workdir}/"
+	mkdir -p "${Workdir}"
+	cd "${Workdir}"
+	rm -f *.{conf,m3u} *"-log.txt" "${STAT}"
+	[ -e "${PIPE}" ] || \
+		mkfifo "${PIPE}"
 
 	UpdateReport="y"
 	Msgs=""
@@ -149,9 +156,6 @@ LoadConfig() {
 	PreBackupRotate
 	exec >> "${LOG}" 2>&1
 	_applog "${msg}"
-
-	[ ! -s "/etc/default/${NAME}" ] || \
-		. "/etc/default/${NAME}"
 
 	! printf '%s\n' "${@}" | grep -qsxiF 'debug' || \
 		Debug="y"
@@ -179,8 +183,15 @@ LoadConfig() {
 			! grep -qswF "${data/ /:}" <<< "${Blacklist}" || \
 				continue
 			let "adapter=Adapters+1,1"
-			eval adapter${adapter}_card='${data%% *}'
-			eval adapter${adapter}_tuner='${data##* }'
+			card=${data%% *}
+			tuner=${data##* }
+			eval adapter${adapter}_card='${card}'
+			eval adapter${adapter}_tuner='${tuner}'
+			[ ${tuner} -eq 0 ] || \
+				for item in demux dvr net; do
+					[ -e "/dev/dvb/adapter${card}/${item}${tuner}" ] || \
+						ln -s "${item}0" "/dev/dvb/adapter${card}/${item}${tuner}"
+				done
 			let "ind++,1"
 			;;
 		1)
@@ -221,7 +232,7 @@ LoadConfig() {
 			ind=0
 			;;
 		esac
-	done < <(mumudvb --list-cards 2>&1)
+	done < <(/usr/bin/mumudvb --list-cards 2>&1)
 
 	while read -r conffile; do
 		let "Configs++,1"
@@ -272,7 +283,8 @@ LoadConfig() {
 
 StartServer() {
 	local portHttp="${1}" \
-		c pid config dvbtype adapter card tuner freq freqmin freqmax
+		c pid config dvbtype adapter card tuner freq freqmin freqmax \
+		demux filename_pid log_file playlist
 
 	RuleClean ${portHttp}
 
@@ -305,38 +317,60 @@ StartServer() {
 	if [ -z "${pid}" ]; then
 		eval conffile=\"\${config${config}_conffile:-}\"
 		tmpconffile="${portHttp}-$(basename "${conffile}")"
+		filename_pid="${Workdir}$(basename "${tmpconffile}" ".conf").pid"
+		: > "${filename_pid}"
+		log_file="${Workdir}$(basename "${tmpconffile}" ".conf").log"
+		: > "${log_file}"
+		chmod a+rw "${filename_pid}" "${log_file}"
 		sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
 			-e "/^card=.*/s//card=${card}/" \
 			-e "/^tuner=.*/s//tuner=${tuner}/" \
 			-e "/^timeout_no_diff=.*/s//timeout_no_diff=${IdleTimeout}/" \
+			-e "/^filename_pid=.*/s||filename_pid=${filename_pid}|" \
+			-e "/^log_file=.*/s||log_file=${log_file}|" \
 			< "${conffile}" > "${tmpconffile}"
+		grep -qse "^timeout_no_diff=" < "${tmpconffile}" || \
+			sed -i -e "1itimeout_no_diff=${IdleTimeout}" "${tmpconffile}"
+		grep -qse "^filename_pid=" < "${tmpconffile}" || \
+			sed -i -e "1ifilename_pid=${filename_pid}" "${tmpconffile}"
+		grep -qse "^log_file=" < "${tmpconffile}" || \
+			sed -i -e "1ilog_file=${log_file}" "${tmpconffile}"
 
-		( /usr/bin/mumudvb -d -c "${tmpconffile}" \
-			> "${portHttp}-log.txt" 2>&1 ) &
-		pid=${!}
+		/usr/bin/mumudvb -c "${tmpconffile}"
 		_applog "Info: starting mumudvb server ${portHttp}"
-		playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
-		rm -f "${playlist}"
-		c=5
-		while kill -s 0 ${pid} 2> /dev/null && \
-		let "c--"; do
-			sleep $((IdleTimeout/4))
-			if [ -n "$(ss --no-header --numeric --tcp \
-			state connected sport ${portHttp})" ]; then
-				c=5
-				[ -e "${playlist}" ] || \
-					wget --quiet -O "${playlist}" \
-					"http://$(hostname):${portHttp}/playlist.m3u" || :
+		sleep 2
+		if pid="$(cat "${filename_pid}" 2> /dev/null)" && \
+		[ -n "${pid}" ]; then
+			[ -z "${Debug}" ] || \
+				_applog "Info: mumudvb server ${portHttp} runs in pid ${pid}"
+			playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
+			rm -f "${playlist}"
+			c=${IdleTimeout}
+			while kill -s 0 ${pid} 2> /dev/null && \
+			let "c--"; do
+				sleep 1
+				if [ -n "$(ss --no-header --numeric --tcp \
+				state connected sport ${portHttp})" ]; then
+					c=${IdleTimeout}
+					[ -e "${playlist}" ] || \
+						wget --quiet -O "${playlist}" \
+						"http://$(hostname):${portHttp}/playlist.m3u" || :
+				fi
+			done
+			if kill -s 0 ${pid} 2> /dev/null; then
+				kill -s TERM ${pid} 2> /dev/null || :
+				_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
+			else
+				pid=0
 			fi
-		done
-		if kill -s 0 ${pid} 2> /dev/null; then
-			kill -s TERM ${pid} 2> /dev/null || :
-			_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
 		else
-			_applog "Info: mumudvb server ${portHttp} has stopped himself"
+			_applog "Err: mumudvb server ${portHttp} doesn't run"
+			pid=0
 		fi
+		[ ${pid} -ne 0 ] || \
+			_applog "Info: mumudvb server ${portHttp} has stopped himself"
 		wait ${pid} 2> /dev/null || :
-		sleep 1
+		sleep 2
 	else
 		_applog "Warn: another adapter not available for ${portHttp}"
 	fi
@@ -360,7 +394,6 @@ _exit() {
 Main() {
 	# constants
 	readonly NAME APPNAME="${NAME}" \
-		TMPDIR="/run/${NAME}/" \
 		STAT="status.txt" \
 		PIPE="pipe" \
 		LOG="log.txt" \
@@ -382,7 +415,7 @@ Main() {
 	LoadConfig || \
 		exit 1
 
-	trap '[ -n "${ReloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' \
+	trap '[ -n "${ReloadConfig}" -o -n "${Servers}" ] || echo "${RELOAD}" >> "${PIPE}"' \
 		"${IRELOAD}"
 	trap 'ListStatus' "${ISTAT}"
 
