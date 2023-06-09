@@ -5,7 +5,6 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=-/etc/default/dvbondemand
 ExecStart=/usr/sbin/dvbondemand start
 ExecStop=/bin/kill -s SIGINT -$MAINPID
 ExecReload=/bin/kill -s SIGHUP $MAINPID

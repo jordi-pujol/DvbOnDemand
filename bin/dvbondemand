@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.5 $
+#  $Revision: 1.6 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -144,7 +144,7 @@ LoadConfig() {
 		Workdir="${Workdir}/"
 	mkdir -p "${Workdir}"
 	cd "${Workdir}"
-	rm -f *.{conf,m3u} *"-log.txt" "${STAT}"
+	rm -f *.{conf,m3u} {0..9}* "${STAT}" 2> /dev/null
 	[ -e "${PIPE}" ] || \
 		mkfifo "${PIPE}"
 
@@ -178,7 +178,8 @@ LoadConfig() {
 		case "${ind}" in
 		0)
 			data="$(sed -nr \
-			-e '/Info:[ ]+DVB:[ =]+Card ([[:digit:]]+) - Tuner ([[:digit:]]+) [=]+/{s//\1 \2/;p;q}' \
+			-e '/Info:[ ]+DVB:[ =]+Card ([[:digit:]]+) - Tuner ([[:digit:]]+) [=]+/{
+			s//\1 \2/;p;q}' \
 			-e '${q1}' <<< "${line}")" && \
 			! grep -qswF "${data/ /:}" <<< "${Blacklist}" || \
 				continue
@@ -265,14 +266,15 @@ LoadConfig() {
 		let "portHttp=PortHttp+config,1"
 		RuleInsert ${portHttp}
 		eval dvbtype=\"\${config${config}_dvbtype:-}\"
+		services="$(set | \
+		sed -nre "/^config${config}_service_([[:digit:]]+)=(.*)/s//\1 \2/p")"
 		while read service name; do
 			printf '%s:%s,%s %s\n' \
 				"#EXTINF" "${service}" \
 				"${dvbtype}" "${name}"
 			printf '%s\n' \
 				"http://$(hostname):${portHttp}/bysid/${service}"
-		done < <(set | \
-		sed -nre "/^config${config}_service_([[:digit:]]+)=(.*)/s//\1 \2/p")
+		done <<< "${services:-"service ${portHttp}"}"
 	done
 	} > "${PLAYLIST}"
 
@@ -284,7 +286,7 @@ LoadConfig() {
 StartServer() {
 	local portHttp="${1}" \
 		c pid config dvbtype adapter card tuner freq freqmin freqmax \
-		demux filename_pid log_file playlist
+		timeout filename_pid log_file playlist
 
 	RuleClean ${portHttp}
 
@@ -295,10 +297,8 @@ StartServer() {
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		demux="/dev/dvb/adapter${card}/demux${tuner}"
-		[ -e "${demux}" ] || \
-			demux="/dev/dvb/adapter${card}/demux0"
-		if pid="$(lsof -wt "${demux}")"; then
+		if pid="$(lsof -wt \
+		"$(readlink -f "/dev/dvb/adapter${card}/demux${tuner}")")"; then
 			[ -z "${Debug}" ] || \
 				_applog "Info: not selecting adapter${card}/demux${tuner}"
 			continue
@@ -345,13 +345,13 @@ StartServer() {
 				_applog "Info: mumudvb server ${portHttp} runs in pid ${pid}"
 			playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
 			rm -f "${playlist}"
-			c=${IdleTimeout}
+			let "timeout=(IdleTimeout/2+1)*2,c=timeout,1"
 			while kill -s 0 ${pid} 2> /dev/null && \
-			let "c--"; do
-				sleep 1
+			let "c-=2"; do
+				sleep 2
 				if [ -n "$(ss --no-header --numeric --tcp \
 				state connected sport ${portHttp})" ]; then
-					c=${IdleTimeout}
+					c=${timeout}
 					[ -e "${playlist}" ] || \
 						wget --quiet -O "${playlist}" \
 						"http://$(hostname):${portHttp}/playlist.m3u" || :
@@ -385,7 +385,7 @@ _exit() {
 	_applog "Daemon exit"
 	printf '%s\n\n' "Daemon exit" >&2
 	RuleClean
-	pidsChildren=""; _ps_children
+	pidsChildren="$(cat *.pid 2> /dev/null)"; _ps_children
 	[ -z "${pidsChildren}" ] || \
 		kill -s TERM ${pidsChildren} 2> /dev/null || :
 	wait || :
@@ -415,9 +415,8 @@ Main() {
 	LoadConfig || \
 		exit 1
 
-	trap '[ -n "${ReloadConfig}" -o -n "${Servers}" ] || echo "${RELOAD}" >> "${PIPE}"' \
-		"${IRELOAD}"
-	trap 'ListStatus' "${ISTAT}"
+	trap '[ -n "${ReloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
+	trap 'echo "ListStatus" >> "${PIPE}"' "${ISTAT}"
 
 	( journalctl --since="@$(_UTCseconds)" \
 		--follow "--grep=${NEWREQUEST}" --output=cat | \
@@ -447,7 +446,10 @@ Main() {
 					<<< "${Servers}")"
 				ListStatus
 			elif [ "${line}" = "${RELOAD}" ]; then
-				LoadConfig
+				[ -n "${Servers}" ] || \
+					LoadConfig
+			elif [ "${line}" = "ListStatus" ]; then
+				ListStatus
 			else
 				[ -z "${Debug}" ] || \
 					_applog "Warn: received invalid data from pipe" \
