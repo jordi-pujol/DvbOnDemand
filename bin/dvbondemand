@@ -79,7 +79,8 @@ BackupRotate() {
 }
 
 RuleInsert() {
-	local portHttp="${1}"
+	local portHttp="${1}" \
+		config conffile
 	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp})" ] || \
 		_applog "Warn: will set watch on port ${portHttp}" \
 			"when server is already active"
@@ -87,8 +88,11 @@ RuleInsert() {
 		--dport ${portHttp} -m state --state NEW \
 		-m limit --limit 20/min \
 		-j LOG --log-level info --log-prefix "${NEWREQUEST}${portHttp}"
-	[ -z "${Debug}" ] || \
-		_applog "Info: watching port ${portHttp}"
+	if [ -n "${Debug}" ]; then
+		let "config=portHttp-PortHttp,1"
+		eval conffile=\"\${config${config}_conffile:-}\"
+		_applog "Info: watching port ${portHttp} for \"${conffile}\""
+	fi
 }
 
 RuleClean() {
@@ -116,7 +120,7 @@ RuleClean() {
 ListStatus() {
 	set | awk \
 		'/^(adapter|config)[[:digit:]]*_/ {print}
-		/^(Debug|PortHttp|LogRotate|IdleTimeout|Blacklist)/ {print}' \
+		/^(Debug|PortHttp|LogRotate|IdleTimeout|Blacklist|Servers)/ {print}' \
 		> "${STAT}"
 }
 
@@ -284,20 +288,88 @@ LoadConfig() {
 }
 
 StartServer() {
+	# global config
 	local portHttp="${1}" \
-		c pid config dvbtype adapter card tuner freq freqmin freqmax \
-		timeout filename_pid log_file playlist
+		card="${2}" \
+		tuner="${3}" \
+		conffile tmpconffile filename_pid log_file playlist \
+		c pid timeout
 
 	RuleClean ${portHttp}
+	eval conffile=\"\${config${config}_conffile:-}\"
+	tmpconffile="${portHttp}-$(basename "${conffile}")"
+	filename_pid="${Workdir}${portHttp}.pid"
+	: > "${filename_pid}"
+	log_file="${Workdir}$(basename "${tmpconffile}" ".conf").log"
+	: > "${log_file}"
+	chmod a+rw "${filename_pid}" "${log_file}"
+	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
+		-e "/^card=.*/s//card=${card}/" \
+		-e "/^tuner=.*/s//tuner=${tuner}/" \
+		-e "/^timeout_no_diff=.*/s//timeout_no_diff=${IdleTimeout}/" \
+		-e "/^filename_pid=.*/s||filename_pid=${filename_pid}|" \
+		-e "/^log_file=.*/s||log_file=${log_file}|" \
+		< "${conffile}" > "${tmpconffile}"
+	grep -qse "^timeout_no_diff=" < "${tmpconffile}" || \
+		sed -i -e "1itimeout_no_diff=${IdleTimeout}" "${tmpconffile}"
+	grep -qse "^filename_pid=" < "${tmpconffile}" || \
+		sed -i -e "1ifilename_pid=${filename_pid}" "${tmpconffile}"
+	grep -qse "^log_file=" < "${tmpconffile}" || \
+		sed -i -e "1ilog_file=${log_file}" "${tmpconffile}"
 
-	let "config=portHttp-PortHttp,1"
+	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconffile}"
+	_applog "Info: starting mumudvb server ${portHttp}"
+	pid=""
+	let "timeout=(IdleTimeout/2+1)*2,c=timeout,1"
+	while ps -e -o args --no-headers -p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
+	grep -qsF "${tmpconffile}" && \
+	pid="$(cat "${filename_pid}" 2> /dev/null)" && \
+	[ -z "${pid}" ] && \
+	let "c-=2"; do
+		sleep 2
+	done
+	if [ -n "${pid}" ]; then
+		[ -z "${Debug}" ] || \
+			_applog "Info: mumudvb server ${portHttp} is running"
+		playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
+		rm -f "${playlist}"
+		c=${timeout}
+		while kill -s 0 ${pid} 2> /dev/null && \
+		let "c-=2"; do
+			sleep 2
+			[ -e "${playlist}" ] || \
+				wget --quiet -O "${playlist}" \
+				"http://$(hostname):${portHttp}/playlist.m3u" || :
+			[ -z "$(ss --no-header --numeric --tcp \
+			state connected sport ${portHttp})" ] || \
+				c=${timeout}
+		done
+		if kill -s 0 ${pid} 2> /dev/null; then
+			_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
+			kill -s TERM ${pid} 2> /dev/null || :
+		else
+			_applog "Info: mumudvb server ${portHttp} has stopped himself"
+		fi
+	else
+		_applog "Err: mumudvb server ${portHttp} doesn't run"
+	fi
+	sleep 2
+	rm -f "${filename_pid}"
+	RuleInsert ${portHttp}
+	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
+}
+
+GetAdapter() {
+	# global card tuner
+	local config="${1}" \
+		dvbtype freq freqmax freqmin pid adapter
 	eval dvbtype=\"\${config${config}_dvbtype:-}\"
 	eval freq=\"\${config${config}_freq:-}\"
-	pid=0
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		if pid="$(lsof -wt \
+		if grep -qsEe "[[:digit:]]+:${card}:${tuner}[\t]" <<< "${Servers}" || \
+		pid="$(lsof -wt \
 		"$(readlink -f "/dev/dvb/adapter${card}/demux${tuner}")")"; then
 			[ -z "${Debug}" ] || \
 				_applog "Info: not selecting adapter${card}/demux${tuner}"
@@ -306,77 +378,13 @@ StartServer() {
 		eval freqmin=\"\${adapter${adapter}_freqmin:-}\"
 		eval freqmax=\"\${adapter${adapter}_freqmax:-}\"
 		[ ${freqmin} -gt ${freq} -o  ${freq} -gt ${freqmax} ] || \
-			break
-		pid=0
+			return ${OK}
 		[ -z "${Debug}" ] || \
 			_applog "Info: frequency ${freq} out of range" \
 				"adapter${card}/frontend${tuner}"
 	done < <(set | \
 	sed -nre "/^adapter([[:digit:]]+)_dvbtype=${dvbtype}/s//\1/p")
-
-	if [ -z "${pid}" ]; then
-		eval conffile=\"\${config${config}_conffile:-}\"
-		tmpconffile="${portHttp}-$(basename "${conffile}")"
-		filename_pid="${Workdir}$(basename "${tmpconffile}" ".conf").pid"
-		: > "${filename_pid}"
-		log_file="${Workdir}$(basename "${tmpconffile}" ".conf").log"
-		: > "${log_file}"
-		chmod a+rw "${filename_pid}" "${log_file}"
-		sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
-			-e "/^card=.*/s//card=${card}/" \
-			-e "/^tuner=.*/s//tuner=${tuner}/" \
-			-e "/^timeout_no_diff=.*/s//timeout_no_diff=${IdleTimeout}/" \
-			-e "/^filename_pid=.*/s||filename_pid=${filename_pid}|" \
-			-e "/^log_file=.*/s||log_file=${log_file}|" \
-			< "${conffile}" > "${tmpconffile}"
-		grep -qse "^timeout_no_diff=" < "${tmpconffile}" || \
-			sed -i -e "1itimeout_no_diff=${IdleTimeout}" "${tmpconffile}"
-		grep -qse "^filename_pid=" < "${tmpconffile}" || \
-			sed -i -e "1ifilename_pid=${filename_pid}" "${tmpconffile}"
-		grep -qse "^log_file=" < "${tmpconffile}" || \
-			sed -i -e "1ilog_file=${log_file}" "${tmpconffile}"
-
-		/usr/bin/mumudvb -c "${tmpconffile}"
-		_applog "Info: starting mumudvb server ${portHttp}"
-		sleep 2
-		if pid="$(cat "${filename_pid}" 2> /dev/null)" && \
-		[ -n "${pid}" ]; then
-			[ -z "${Debug}" ] || \
-				_applog "Info: mumudvb server ${portHttp} runs in pid ${pid}"
-			playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
-			rm -f "${playlist}"
-			let "timeout=(IdleTimeout/2+1)*2,c=timeout,1"
-			while kill -s 0 ${pid} 2> /dev/null && \
-			let "c-=2"; do
-				sleep 2
-				if [ -n "$(ss --no-header --numeric --tcp \
-				state connected sport ${portHttp})" ]; then
-					c=${timeout}
-					[ -e "${playlist}" ] || \
-						wget --quiet -O "${playlist}" \
-						"http://$(hostname):${portHttp}/playlist.m3u" || :
-				fi
-			done
-			if kill -s 0 ${pid} 2> /dev/null; then
-				kill -s TERM ${pid} 2> /dev/null || :
-				_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
-			else
-				pid=0
-			fi
-		else
-			_applog "Err: mumudvb server ${portHttp} doesn't run"
-			pid=0
-		fi
-		[ ${pid} -ne 0 ] || \
-			_applog "Info: mumudvb server ${portHttp} has stopped himself"
-		wait ${pid} 2> /dev/null || :
-		sleep 2
-	else
-		_applog "Warn: another adapter not available for ${portHttp}"
-	fi
-
-	RuleInsert ${portHttp}
-	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
+	return ${ERR}
 }
 
 _exit() {
@@ -406,8 +414,8 @@ Main() {
 	# config variables
 	local Debug PortHttp LogRotate IdleTimeout Blacklist
 	# internal variables, daemon scope
-	local ReloadConfig Adapters Configs \
-		line portHttp Servers=""
+	local ReloadConfig Adapters Configs Servers="" \
+		line portHttp card tuner
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -427,23 +435,32 @@ Main() {
 			if portHttp="$(sed -nr \
 			-e "/.*${NEWREQUEST}.*DPT=([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				if grep -qswF "${portHttp}" <<< "${Servers}" || \
+				if printf '%s' "${Servers}" | \
+				awk -v portHttp="${portHttp}" \
+				'BEGIN{RS=" "; FS=":"}
+				$1 == portHttp {rc=-1; exit}
+				END{exit rc+1}' || \
 				[ -n "$(ss --no-header --numeric --tcp state all \
 				sport ${portHttp} )" ]; then
 					[ -z "${Debug}" ] || \
 						_applog "Warn: new request for already active server ${portHttp}"
 				else
-					StartServer ${portHttp} &
-					Servers="${Servers}${portHttp}${TAB}"
-					ListStatus
+					let "config=portHttp-PortHttp,1"
+					if GetAdapter ${config}; then
+						Servers="${Servers}${portHttp}:${card}:${tuner} "
+						StartServer ${portHttp} ${card} ${tuner} &
+						ListStatus
+					else
+						_applog "Warn: another adapter not available for ${portHttp}"
+					fi
 				fi
 			elif portHttp="$(sed -nr \
 			-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				Servers="$(awk -v portHttp="${portHttp}" \
-					'BEGIN{RS="\t"; ORS="\t"}
-					$1 != portHttp {print}' \
-					<<< "${Servers}")"
+				Servers="$(printf '%s' "${Servers}" | \
+					awk -v portHttp="${portHttp}" \
+					'BEGIN{RS=" "; FS=":"}
+					$1 != portHttp {printf $1 ":" $2 ":" $3 " "}')"
 				ListStatus
 			elif [ "${line}" = "${RELOAD}" ]; then
 				[ -n "${Servers}" ] || \
