@@ -78,11 +78,16 @@ BackupRotate() {
 	done
 }
 
+Traffic() {
+	local portHttp="${1}"
+	ss --no-header --numeric --tcp state established sport ${portHttp} | \
+		grep -qswF "${portHttp}"
+}
+
 RuleInsert() {
 	local portHttp="${1}" \
 		config conffile
-	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp} | \
-	grep -svF 'TIME-WAIT')" ] || \
+	! Traffic ${portHttp} || \
 		[ -z "${Debug}" ] || \
 			_applog "Warn: will set watch on port ${portHttp}" \
 				"when server is already active"
@@ -268,22 +273,6 @@ LoadConfig() {
 		RuleInsert $((PortHttp+config))
 	done
 
-#	{ printf '%s\n' "#EXTM3U"
-#	for config in $(seq ${Configs}); do
-#		let "portHttp=PortHttp+config,1"
-#		eval dvbtype=\"\${config${config}_dvbtype:-}\"
-#		services="$(set | \
-#		sed -nre "/^config${config}_service_([[:digit:]]+)=(.*)/s//\1 \2/p")"
-#		while read service name; do
-#			printf '%s:%s,%s %s\n' \
-#				"#EXTINF" "${service}" \
-#				"${dvbtype}" "${name}"
-#			printf '%s\n' \
-#				"http://$(hostname):${portHttp}/bysid/${service}"
-#		done <<< "${services:-"service ${portHttp}"}"
-#	done
-#	} > "${PLAYLIST}"
-
 	ListStatus
 
 	ReloadConfig=""
@@ -294,7 +283,7 @@ StartServer() {
 	local portHttp="${1}" \
 		card="${2}" \
 		tuner="${3}" \
-		conffile tmpconffile filename_pid log_file playlist \
+		conffile tmpconffile filename_pid log_file \
 		c pid timeout
 
 	RuleClean ${portHttp}
@@ -333,18 +322,11 @@ StartServer() {
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
 			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} is running"
-		#playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
-		#rm -f "${playlist}"
 		c=${timeout}
 		while kill -s 0 ${pid} 2> /dev/null && \
 		let "c-=2"; do
 			sleep 2
-			#[ -e "${playlist}" ] || \
-			#	wget --quiet -O "${playlist}" \
-			#	"http://$(hostname):${portHttp}/playlist.m3u" || :
-			[ -z "$(ss --no-header --numeric --tcp \
-			state connected sport ${portHttp} | \
-			grep -svF 'TIME-WAIT')" ] || \
+			! Traffic ${portHttp} || \
 				c=${timeout}
 		done
 		if kill -s 0 ${pid} 2> /dev/null; then
@@ -414,7 +396,6 @@ Main() {
 		STAT="status.txt" \
 		PIPE="pipe" \
 		LOG="log.txt" \
-		PLAYLIST="playlist.m3u" \
 		IRELOAD="HUP" ISTAT="USR2" \
 		OK=0 ERR=1 TAB=$'\t' NONE=0 \
 		NEWREQUEST="${NAME}New:" \
@@ -444,13 +425,12 @@ Main() {
 			if portHttp="$(sed -nr \
 			-e "/.*${NEWREQUEST}.*DPT=([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				if awk -v portHttp="${portHttp}" \
+				if printf '%s' "${Servers}" | \
+				awk -v portHttp="${portHttp}" \
 				'BEGIN{RS=" "; FS=":"}
 				$1 == portHttp {rc=-1; exit}
-				END{exit rc+1}' <<< "${Servers}" || \
-				[ -n "$(ss --no-header --numeric --tcp state all \
-				sport ${portHttp} | \
-				grep -svF 'TIME-WAIT')" ]; then
+				END{exit rc+1}' || \
+				Traffic ${portHttp}; then
 					_applog "Warn: new request for already active server ${portHttp}"
 				else
 					let "config=portHttp-PortHttp,1"
@@ -465,9 +445,10 @@ Main() {
 			elif portHttp="$(sed -nr \
 			-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				Servers="$(awk -v portHttp="${portHttp}" \
+				Servers="$(printf '%s' "${Servers}" | \
+					awk -v portHttp="${portHttp}" \
 					'BEGIN{RS=" "; FS=":"}
-					$1 != portHttp {printf $0 " "}' <<< "${Servers}")"
+					$1 != portHttp {printf $0 " "}')"
 				ListStatus
 			elif [ "${line}" = "${RELOAD}" ]; then
 				[ -n "${Servers}" ] && \

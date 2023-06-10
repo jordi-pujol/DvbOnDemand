@@ -36,12 +36,6 @@ Server="${2:-"rpi3b"}"
 D="${HOME}/dvbondemand/"
 mkdir -p "${D}"
 
-# scp "${Server}://run/dvbondemand/playlist.m3u" \
-# "${D}playlist.m3u" || {
-# 	echo "Err: dvbondemand is not running" >&2
-# 	exit 1
-# }
-
 [ -n "${Port}" ] || {
 	echo "Err: must specify a valid port" >&2
 	exit 1
@@ -68,6 +62,6 @@ fi
 	exit 1
 }
 
-echo "available dvb services in port ${Port}"
+echo "DVB services available in port ${Port}:"
 echo "${D}playlist-${Port}.m3u"
 cat "${D}playlist-${Port}.m3u"
