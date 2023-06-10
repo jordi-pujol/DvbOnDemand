@@ -79,9 +79,9 @@ BackupRotate() {
 }
 
 Traffic() {
-	local portHttp="${1}"
+	local portHttp=${1}
 	ss --no-header --numeric --tcp state established sport ${portHttp} | \
-		grep -qswF "${portHttp}"
+		grep -qswF ${portHttp}
 }
 
 RuleInsert() {
@@ -122,21 +122,21 @@ RuleClean() {
 }
 
 ListStatus() {
-	set | awk \
-		'/^(adapter|config)[[:digit:]]*_/ {print}
-		/^(Debug|PortHttp|LogRotate|IdleTimeout|Blacklist|Servers)/ {print}' \
+	set | sed -nre "/\(\)[[:blank:]]*$/d" \
+		-e '/^(adapter|config)[[:digit:]]*_/p' \
+		-e '/^[[:upper:]][[:lower:]]/p' \
 		> "${STAT}"
 }
 
 LoadConfig() {
-	local config service name data conffile line ind \
-		card tuner services \
+	local name data conffile line ind \
+		card tuner dvbtype item service_id \
 		msg="Loading configuration"
 
 	mkdir -p -m 0755 "/run/mumudvb"
 	chown -R _mumudvb:video "/run/mumudvb"
 
-	ReloadConfig="y"
+	reloadConfig="y"
 	# config variables, default values
 	Workdir="/run/${NAME}/"
 	Debug=""
@@ -156,9 +156,7 @@ LoadConfig() {
 	[ -e "${PIPE}" ] || \
 		mkfifo "${PIPE}"
 
-	UpdateReport="y"
-	Msgs=""
-	MsgsInfo=""
+	AdapterTypes=""
 	Adapters=${NONE}
 	Configs=${NONE}
 	PreBackupRotate
@@ -207,7 +205,8 @@ LoadConfig() {
 			if data="$(sed -nr \
 			-e '/Info:  DVB:   Frontend : ([[:alnum:]]+)/{s//\1/;p;q}' \
 			-e '${q1}' <<< "${line}")"; then
-				eval adapter${adapter}_name='$(_trim "${data}")'
+				name="$(_trim "${data}")"
+				eval adapter${adapter}_name='${name}'
 				let "ind++,1"
 			else
 				ind=0
@@ -218,13 +217,13 @@ LoadConfig() {
 			-e '/Info:  DVB:[[:blank:]]+([^[:blank:]].*)/{s//\1/;p;q}' \
 			-e '${q1}' <<< "${line}")"; then
 				case "$(_trim "${data}")" in
-				Terrestrial*) data="dvbt" ;;
-				Satellite*) data="dvbs" ;;
-				Cable*) data="dvbc" ;;
-				ATSC*) data="atsc" ;;
+				Terrestrial*) dvbtype="dvbt" ;;
+				Satellite*) dvbtype="dvbs" ;;
+				Cable*) dvbtype="dvbc" ;;
+				ATSC*) dvbtype="atsc" ;;
 				*) ind=0; continue ;;
 				esac
-				eval adapter${adapter}_dvbtype='${data}'
+				eval adapter${adapter}_dvbtype='${dvbtype}'
 				let "ind++,1"
 			else
 				ind=0
@@ -237,6 +236,10 @@ LoadConfig() {
 				eval adapter${adapter}_freqmin='${data%% *}'
 				eval adapter${adapter}_freqmax='${data##* }'
 				let "Adapters++,1"
+				_applog "Detected ${dvbtype} card ${card}:${tuner} \"${name}\""
+				printf '%s' "${AdapterTypes}" | \
+				grep -qswF "${dvbtype}" || \
+					AdapterTypes="${AdapterTypes}${dvbtype} "
 			fi
 			ind=0
 			;;
@@ -267,15 +270,13 @@ LoadConfig() {
 		done < "${conffile}"
 		[ -z "${name}" -o -z "${service_id}" ] || \
 			eval config${Configs}_service_${service_id}='${name}'
-	done < <(ls -1 /etc/mumudvb/{dvbt,dvbc,dvbs,atsc}_*.conf 2> /dev/null)
+		RuleInsert $((PortHttp+Configs))
+	done < <(for dvbtype in ${AdapterTypes}; do
+		ls -1 /etc/mumudvb/${dvbtype}_*.conf 2> /dev/null
+	done)
 
-	for config in $(seq ${Configs}); do
-		RuleInsert $((PortHttp+config))
-	done
-
+	reloadConfig=""
 	ListStatus
-
-	ReloadConfig=""
 }
 
 StartServer() {
@@ -289,8 +290,8 @@ StartServer() {
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
 	tmpconffile="${portHttp}-$(basename "${conffile}")"
-	filename_pid="${Workdir}${portHttp}.pid"
-	log_file="${Workdir}$(basename "${tmpconffile}" ".conf").log"
+	filename_pid="${portHttp}.pid"
+	log_file="$(basename "${tmpconffile}" ".conf").log"
 	: > "${filename_pid}"
 	: > "${log_file}"
 	chmod a+rw "${filename_pid}" "${log_file}"
@@ -314,10 +315,11 @@ StartServer() {
 	let "timeout=(IdleTimeout/2+1)*2,c=timeout,1"
 	while ps -e -o args --no-headers -p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
 	grep -qsF "${tmpconffile}" && \
-	pid="$(cat "${filename_pid}" 2> /dev/null)" && \
-	[ -z "${pid}" ] && \
 	let "c-=2"; do
 		sleep 2
+		pid="$(cat "${filename_pid}" 2> /dev/null)"
+		[ -z "${pid}" ] || \
+			break
 	done
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
@@ -353,7 +355,11 @@ GetAdapter() {
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		if grep -qsF ":${card}:${tuner} " <<< "${Servers}" || \
+		if printf '%s' "${Servers}" | \
+		awk -v card="${card}" -v tuner="${tuner}" \
+		'BEGIN{RS=" "; FS=":"}
+		$2 == card && $3 == tuner {rc=-1; exit}
+		END{exit rc+1}' || \
 		pid="$(lsof -wt \
 		"$(readlink -f "/dev/dvb/adapter${card}/demux${tuner}")")"; then
 			[ -z "${Debug}" ] || \
@@ -374,7 +380,7 @@ GetAdapter() {
 	done < <(set | \
 	sed -nre "/^adapter([[:digit:]]+)_dvbtype=${dvbtype}/s//\1/p")
 
-	_applog "Warn: ${portHttp} all cards are in use"
+	_applog "Warn: ${portHttp} no more cards available"
 	return ${ERR}
 }
 
@@ -400,12 +406,12 @@ Main() {
 		OK=0 ERR=1 TAB=$'\t' NONE=0 \
 		NEWREQUEST="${NAME}New:" \
 		SERVEREND="ServerEnd:" \
-		RELOAD="ReloadConfig"
+		RELOAD="reloadConfig"
 	# config variables
-	local Debug PortHttp LogRotate IdleTimeout Blacklist
+	local Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
 	# internal variables, daemon scope
-	local ReloadConfig Adapters Configs Servers="" \
-		line portHttp card tuner
+	local Adapters Configs Servers="" AdapterTypes \
+		reloadConfig line portHttp config card tuner
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -413,7 +419,7 @@ Main() {
 	LoadConfig || \
 		exit 1
 
-	trap '[ -n "${ReloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
+	trap '[ -n "${reloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
 	trap 'echo "ListStatus" >> "${PIPE}"' "${ISTAT}"
 
 	( journalctl --since="@$(_UTCseconds)" \
@@ -431,17 +437,16 @@ Main() {
 				$1 == portHttp {rc=-1; exit}
 				END{exit rc+1}' || \
 				Traffic ${portHttp}; then
-					_applog "Warn: new request for already active server ${portHttp}"
-				else
-					let "config=portHttp-PortHttp,1"
-					if GetAdapter ${config}; then
-						Servers="${Servers}${portHttp}:${card}:${tuner} "
-						StartServer ${portHttp} ${card} ${tuner} &
-						ListStatus
-					else
-						_applog "Warn: another adapter not available for ${portHttp}"
-					fi
+					_applog "Warn: received new request" \
+						"for already active port ${portHttp}"
+					continue
 				fi
+				let "config=portHttp-PortHttp,1"
+				GetAdapter ${config} || \
+					continue
+				Servers="${Servers}${portHttp}:${card}:${tuner} "
+				StartServer ${portHttp} ${card} ${tuner} &
+				ListStatus
 			elif portHttp="$(sed -nr \
 			-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
@@ -452,15 +457,15 @@ Main() {
 				ListStatus
 			elif [ "${line}" = "${RELOAD}" ]; then
 				[ -n "${Servers}" ] && \
-					_applog "Warn: can't reload config while" \
-						"servers ${Servers}are active" || \
+					_applog "Warn: can't reload the configuration" \
+						"while there are active servers: ${Servers}" || \
 					LoadConfig
 			elif [ "${line}" = "ListStatus" ]; then
 				ListStatus
 			else
 				[ -z "${Debug}" ] || \
 					_applog "Warn: received invalid data from pipe" \
-						"${line}"
+						"\"${line}\""
 			fi
 		else
 			_applog "Warn: can't read from pipe"
