@@ -81,18 +81,18 @@ BackupRotate() {
 RuleInsert() {
 	local portHttp="${1}" \
 		config conffile
-	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp})" ] || \
-		_applog "Warn: will set watch on port ${portHttp}" \
-			"when server is already active"
+	[ -z "$(ss --no-header --numeric --tcp state all sport ${portHttp} | \
+	grep -svF 'TIME-WAIT')" ] || \
+		[ -z "${Debug}" ] || \
+			_applog "Warn: will set watch on port ${portHttp}" \
+				"when server is already active"
 	iptables -4 --wait -I INPUT -p tcp -m tcp \
 		--dport ${portHttp} -m state --state NEW \
 		-m limit --limit 20/min \
 		-j LOG --log-level info --log-prefix "${NEWREQUEST}${portHttp}"
-	if [ -n "${Debug}" ]; then
-		let "config=portHttp-PortHttp,1"
-		eval conffile=\"\${config${config}_conffile:-}\"
-		_applog "Info: watching port ${portHttp} for \"${conffile}\""
-	fi
+	let "config=portHttp-PortHttp,1"
+	eval conffile=\"\${config${config}_conffile:-}\"
+	_applog "Info: watching port ${portHttp} for \"${conffile}\""
 }
 
 RuleClean() {
@@ -107,8 +107,7 @@ RuleClean() {
 			-e "LOG level info prefix \"${NEWREQUEST}${portHttp:-".*"}\"" \
 			<<< "${rule}"; then
 				iptables -4 --wait --delete INPUT ${n}
-				[ -z "${Debug}" ] || \
-					_applog "Info: removing watch on port ${portHttp}"
+				_applog "Info: removing watch on port ${portHttp}"
 				d="y"
 			else
 				let "n++,1"
@@ -126,7 +125,7 @@ ListStatus() {
 
 LoadConfig() {
 	local config service name data conffile line ind \
-		card tuner \
+		card tuner services \
 		msg="Loading configuration"
 
 	mkdir -p -m 0755 "/run/mumudvb"
@@ -265,22 +264,25 @@ LoadConfig() {
 			eval config${Configs}_service_${service_id}='${name}'
 	done < <(ls -1 /etc/mumudvb/{dvbt,dvbc,dvbs,atsc}_*.conf 2> /dev/null)
 
-	{ printf '%s\n' "#EXTM3U"
 	for config in $(seq ${Configs}); do
-		let "portHttp=PortHttp+config,1"
-		RuleInsert ${portHttp}
-		eval dvbtype=\"\${config${config}_dvbtype:-}\"
-		services="$(set | \
-		sed -nre "/^config${config}_service_([[:digit:]]+)=(.*)/s//\1 \2/p")"
-		while read service name; do
-			printf '%s:%s,%s %s\n' \
-				"#EXTINF" "${service}" \
-				"${dvbtype}" "${name}"
-			printf '%s\n' \
-				"http://$(hostname):${portHttp}/bysid/${service}"
-		done <<< "${services:-"service ${portHttp}"}"
+		RuleInsert $((PortHttp+config))
 	done
-	} > "${PLAYLIST}"
+
+#	{ printf '%s\n' "#EXTM3U"
+#	for config in $(seq ${Configs}); do
+#		let "portHttp=PortHttp+config,1"
+#		eval dvbtype=\"\${config${config}_dvbtype:-}\"
+#		services="$(set | \
+#		sed -nre "/^config${config}_service_([[:digit:]]+)=(.*)/s//\1 \2/p")"
+#		while read service name; do
+#			printf '%s:%s,%s %s\n' \
+#				"#EXTINF" "${service}" \
+#				"${dvbtype}" "${name}"
+#			printf '%s\n' \
+#				"http://$(hostname):${portHttp}/bysid/${service}"
+#		done <<< "${services:-"service ${portHttp}"}"
+#	done
+#	} > "${PLAYLIST}"
 
 	ListStatus
 
@@ -299,8 +301,8 @@ StartServer() {
 	eval conffile=\"\${config${config}_conffile:-}\"
 	tmpconffile="${portHttp}-$(basename "${conffile}")"
 	filename_pid="${Workdir}${portHttp}.pid"
-	: > "${filename_pid}"
 	log_file="${Workdir}$(basename "${tmpconffile}" ".conf").log"
+	: > "${filename_pid}"
 	: > "${log_file}"
 	chmod a+rw "${filename_pid}" "${log_file}"
 	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
@@ -318,7 +320,7 @@ StartServer() {
 		sed -i -e "1ilog_file=${log_file}" "${tmpconffile}"
 
 	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconffile}"
-	_applog "Info: starting mumudvb server ${portHttp}"
+	_applog "Info: starting mumudvb server ${portHttp}:${card}:${tuner}"
 	pid=""
 	let "timeout=(IdleTimeout/2+1)*2,c=timeout,1"
 	while ps -e -o args --no-headers -p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
@@ -330,28 +332,29 @@ StartServer() {
 	done
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
-			_applog "Info: mumudvb server ${portHttp} is running"
-		playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
-		rm -f "${playlist}"
+			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} is running"
+		#playlist="$(basename "${tmpconffile}" ".conf")-playlist.m3u"
+		#rm -f "${playlist}"
 		c=${timeout}
 		while kill -s 0 ${pid} 2> /dev/null && \
 		let "c-=2"; do
 			sleep 2
-			[ -e "${playlist}" ] || \
-				wget --quiet -O "${playlist}" \
-				"http://$(hostname):${portHttp}/playlist.m3u" || :
+			#[ -e "${playlist}" ] || \
+			#	wget --quiet -O "${playlist}" \
+			#	"http://$(hostname):${portHttp}/playlist.m3u" || :
 			[ -z "$(ss --no-header --numeric --tcp \
-			state connected sport ${portHttp})" ] || \
+			state connected sport ${portHttp} | \
+			grep -svF 'TIME-WAIT')" ] || \
 				c=${timeout}
 		done
 		if kill -s 0 ${pid} 2> /dev/null; then
-			_applog "Info: mumudvb server ${portHttp} is idle. Stopping it"
+			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} is idle. Stopping it"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			_applog "Info: mumudvb server ${portHttp} has stopped himself"
+			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} has stopped himself"
 		fi
 	else
-		_applog "Err: mumudvb server ${portHttp} doesn't run"
+		_applog "Err: mumudvb server ${portHttp}:${card}:${tuner} doesn't run"
 	fi
 	sleep 2
 	rm -f "${filename_pid}"
@@ -360,7 +363,7 @@ StartServer() {
 }
 
 GetAdapter() {
-	# global card tuner
+	# global portHttp card tuner
 	local config="${1}" \
 		dvbtype freq freqmax freqmin pid adapter
 	eval dvbtype=\"\${config${config}_dvbtype:-}\"
@@ -368,22 +371,28 @@ GetAdapter() {
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		if grep -qsEe "[[:digit:]]+:${card}:${tuner}[\t]" <<< "${Servers}" || \
+		if grep -qsF ":${card}:${tuner} " <<< "${Servers}" || \
 		pid="$(lsof -wt \
 		"$(readlink -f "/dev/dvb/adapter${card}/demux${tuner}")")"; then
 			[ -z "${Debug}" ] || \
-				_applog "Info: not selecting adapter${card}/demux${tuner}"
+				_applog "Info: ${portHttp} can't use" \
+					"adapter${card}/frontend${tuner}"
 			continue
 		fi
 		eval freqmin=\"\${adapter${adapter}_freqmin:-}\"
 		eval freqmax=\"\${adapter${adapter}_freqmax:-}\"
-		[ ${freqmin} -gt ${freq} -o  ${freq} -gt ${freqmax} ] || \
+		[ ${freqmin} -gt ${freq} -o  ${freq} -gt ${freqmax} ] || {
+			_applog "Info: ${portHttp} selects" \
+				"adapter${card}/frontend${tuner}"
 			return ${OK}
+		}
 		[ -z "${Debug}" ] || \
-			_applog "Info: frequency ${freq} out of range" \
+			_applog "Info: ${portHttp} frequency ${freq} out of range" \
 				"adapter${card}/frontend${tuner}"
 	done < <(set | \
 	sed -nre "/^adapter([[:digit:]]+)_dvbtype=${dvbtype}/s//\1/p")
+
+	_applog "Warn: ${portHttp} all cards are in use"
 	return ${ERR}
 }
 
@@ -435,15 +444,14 @@ Main() {
 			if portHttp="$(sed -nr \
 			-e "/.*${NEWREQUEST}.*DPT=([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				if printf '%s' "${Servers}" | \
-				awk -v portHttp="${portHttp}" \
+				if awk -v portHttp="${portHttp}" \
 				'BEGIN{RS=" "; FS=":"}
 				$1 == portHttp {rc=-1; exit}
-				END{exit rc+1}' || \
+				END{exit rc+1}' <<< "${Servers}" || \
 				[ -n "$(ss --no-header --numeric --tcp state all \
-				sport ${portHttp} )" ]; then
-					[ -z "${Debug}" ] || \
-						_applog "Warn: new request for already active server ${portHttp}"
+				sport ${portHttp} | \
+				grep -svF 'TIME-WAIT')" ]; then
+					_applog "Warn: new request for already active server ${portHttp}"
 				else
 					let "config=portHttp-PortHttp,1"
 					if GetAdapter ${config}; then
@@ -457,13 +465,14 @@ Main() {
 			elif portHttp="$(sed -nr \
 			-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
-				Servers="$(printf '%s' "${Servers}" | \
-					awk -v portHttp="${portHttp}" \
+				Servers="$(awk -v portHttp="${portHttp}" \
 					'BEGIN{RS=" "; FS=":"}
-					$1 != portHttp {printf $1 ":" $2 ":" $3 " "}')"
+					$1 != portHttp {printf $0 " "}' <<< "${Servers}")"
 				ListStatus
 			elif [ "${line}" = "${RELOAD}" ]; then
-				[ -n "${Servers}" ] || \
+				[ -n "${Servers}" ] && \
+					_applog "Warn: can't reload config while" \
+						"servers ${Servers}are active" || \
 					LoadConfig
 			elif [ "${line}" = "ListStatus" ]; then
 				ListStatus
