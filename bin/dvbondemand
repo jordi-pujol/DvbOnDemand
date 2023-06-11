@@ -273,8 +273,8 @@ LoadConfig() {
 			eval config${Configs}_service_${service_id}='${name}'
 		RuleInsert $((PortHttp+Configs))
 	done < <(for dvbtype in ${AdapterTypes}; do
-		ls -1 /etc/mumudvb/${dvbtype}_*.conf 2> /dev/null
-	done)
+			ls -1 /etc/mumudvb/${dvbtype}_*.conf 2> /dev/null
+		done)
 
 	reloadConfig=""
 	ListStatus
@@ -396,7 +396,7 @@ _exit() {
 
 Main() {
 	# constants
-	readonly NAME APPNAME="${NAME}" \
+	readonly NAME \
 		STAT="status.txt" \
 		PIPE="pipe" \
 		LOG="log.txt" \
