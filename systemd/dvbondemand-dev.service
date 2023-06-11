@@ -5,10 +5,9 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/bin/bash -c "! /usr/bin/systemctl dvdondemand enabled || \
-	( /usr/bin/systemctl dvdondemand running && \
-		/usr/bin/systemctl dvdondemand reload || \
-		/usr/bin/systemctl dvdondemand restart )"
+ExecStart=/bin/bash -c "! /usr/bin/systemctl enabled dvbondemand.service || \
+	( /usr/bin/systemctl status dvbondemand.service && \
+		/usr/bin/systemctl reload dvbondemand.service || \
+		/usr/bin/systemctl restart dvbondemand.service )"
 
 [Install]
-WantedBy=multi-user.target

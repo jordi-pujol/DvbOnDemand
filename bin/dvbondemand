@@ -285,14 +285,14 @@ StartServer() {
 	local portHttp="${1}" \
 		card="${2}" \
 		tuner="${3}" \
-		conffile tmpconffile filename_pid log_file \
+		conffile tmpconf filename_pid log_file \
 		c pid
 
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
-	tmpconffile="${portHttp}-$(basename "${conffile}")"
+	tmpconf="${portHttp}-$(basename "${conffile}")"
 	filename_pid="${portHttp}.pid"
-	log_file="$(basename "${tmpconffile}" ".conf").log"
+	log_file="$(basename "${tmpconf}" ".conf").log"
 	: > "${filename_pid}"
 	: > "${log_file}"
 	chown _mumudvb:video "${filename_pid}" "${log_file}"
@@ -301,17 +301,18 @@ StartServer() {
 		-e "/^tuner=.*/s//tuner=${tuner}/" \
 		-e "/^filename_pid=.*/s||filename_pid=${filename_pid}|" \
 		-e "/^log_file=.*/s||log_file=${log_file}|" \
-		< "${conffile}" > "${tmpconffile}"
-	grep -qse "^filename_pid=" < "${tmpconffile}" || \
-		sed -i -e "1ifilename_pid=${filename_pid}" "${tmpconffile}"
-	grep -qse "^log_file=" < "${tmpconffile}" || \
-		sed -i -e "1ilog_file=${log_file}" "${tmpconffile}"
+		< "${conffile}" > "${tmpconf}"
+	grep -qse "^filename_pid=" < "${tmpconf}" || \
+		sed -i -e "1ifilename_pid=${filename_pid}" "${tmpconf}"
+	grep -qse "^log_file=" < "${tmpconf}" || \
+		sed -i -e "1ilog_file=${log_file}" "${tmpconf}"
 
-	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconffile}"
+	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
 	_applog "Info: starting mumudvb server ${portHttp}:${card}:${tuner}"
 	c=${IdleTimeout}
+	pid=""
 	while ps -e -o args --no-headers -p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
-	grep -qsF "${tmpconffile}" && \
+	grep -qsF "${tmpconf}" && \
 	let "c-=2"; do
 		sleep 2
 		pid="$(cat "${filename_pid}" 2> /dev/null)" && \
