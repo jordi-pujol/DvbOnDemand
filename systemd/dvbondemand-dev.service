@@ -1,0 +1,14 @@
+[Unit]
+Description=Gets audio/video services from several dvb cards.
+#Documentation=man:dvbondemand(1)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c "! /usr/bin/systemctl dvdondemand enabled || \
+	( /usr/bin/systemctl dvdondemand running && \
+		/usr/bin/systemctl dvdondemand reload || \
+		/usr/bin/systemctl dvdondemand restart )"
+
+[Install]
+WantedBy=multi-user.target

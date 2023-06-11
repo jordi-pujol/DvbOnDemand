@@ -1,0 +1,10 @@
+[Unit]
+Description=Gets audio/video services from several dvb cards.
+#Documentation=man:dvbondemand(1)
+
+[Path]
+PathChanged=/dev/dvb/
+Unit=dvbondemand-dev.service
+
+[Install]
+WantedBy=multi-user.target

@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.6 $
+#  $Revision: 1.7 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -87,8 +87,8 @@ Traffic() {
 RuleInsert() {
 	local portHttp="${1}" \
 		config conffile
-	! Traffic ${portHttp} || \
-		[ -z "${Debug}" ] || \
+	[ -z "${Debug}" ] || \
+		! Traffic ${portHttp} || \
 			_applog "Warn: will set watch on port ${portHttp}" \
 				"when server is already active"
 	iptables -4 --wait -I INPUT -p tcp -m tcp \
@@ -148,6 +148,7 @@ LoadConfig() {
 	[ ! -s "/etc/default/${NAME}" ] || \
 		. "/etc/default/${NAME}"
 
+	let "IdleTimeout+=IdleTimeout%2,1"
 	[ "${Workdir: -1}" = '/' ] || \
 		Workdir="${Workdir}/"
 	mkdir -p "${Workdir}"
@@ -285,7 +286,7 @@ StartServer() {
 		card="${2}" \
 		tuner="${3}" \
 		conffile tmpconffile filename_pid log_file \
-		c pid timeout
+		c pid
 
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
@@ -294,16 +295,13 @@ StartServer() {
 	log_file="$(basename "${tmpconffile}" ".conf").log"
 	: > "${filename_pid}"
 	: > "${log_file}"
-	chmod a+rw "${filename_pid}" "${log_file}"
+	chown _mumudvb:video "${filename_pid}" "${log_file}"
 	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
 		-e "/^card=.*/s//card=${card}/" \
 		-e "/^tuner=.*/s//tuner=${tuner}/" \
-		-e "/^timeout_no_diff=.*/s//timeout_no_diff=${IdleTimeout}/" \
 		-e "/^filename_pid=.*/s||filename_pid=${filename_pid}|" \
 		-e "/^log_file=.*/s||log_file=${log_file}|" \
 		< "${conffile}" > "${tmpconffile}"
-	grep -qse "^timeout_no_diff=" < "${tmpconffile}" || \
-		sed -i -e "1itimeout_no_diff=${IdleTimeout}" "${tmpconffile}"
 	grep -qse "^filename_pid=" < "${tmpconffile}" || \
 		sed -i -e "1ifilename_pid=${filename_pid}" "${tmpconffile}"
 	grep -qse "^log_file=" < "${tmpconffile}" || \
@@ -311,25 +309,24 @@ StartServer() {
 
 	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconffile}"
 	_applog "Info: starting mumudvb server ${portHttp}:${card}:${tuner}"
-	pid=""
-	let "timeout=(IdleTimeout/2+1)*2,c=timeout,1"
+	c=${IdleTimeout}
 	while ps -e -o args --no-headers -p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
 	grep -qsF "${tmpconffile}" && \
 	let "c-=2"; do
 		sleep 2
-		pid="$(cat "${filename_pid}" 2> /dev/null)"
+		pid="$(cat "${filename_pid}" 2> /dev/null)" && \
 		[ -z "${pid}" ] || \
 			break
 	done
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
 			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} is running"
-		c=${timeout}
+		c=${IdleTimeout}
 		while kill -s 0 ${pid} 2> /dev/null && \
 		let "c-=2"; do
 			sleep 2
 			! Traffic ${portHttp} || \
-				c=${timeout}
+				c=${IdleTimeout}
 		done
 		if kill -s 0 ${pid} 2> /dev/null; then
 			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} is idle. Stopping it"
