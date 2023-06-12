@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.7 $
+#  $Revision: 1.8 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -285,12 +285,8 @@ LoadConfig() {
 }
 
 StartServer() {
-	# global config
-	local portHttp="${1}" \
-		card="${2}" \
-		tuner="${3}" \
-		conffile tmpconf filename_pid log_file \
-		c pid
+	# global config portHttp card tuner
+	local conffile tmpconf filename_pid log_file c pid
 
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
@@ -315,7 +311,7 @@ StartServer() {
 	_applog "Info: starting mumudvb server ${portHttp}:${card}:${tuner}"
 	c=${IdleTimeout}
 	pid=""
-	while ps -e -o args --no-headers -p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
+	while ps -o args --no-headers -p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
 	grep -qsF "${tmpconf}" && \
 	let "c-=2"; do
 		sleep 2
@@ -340,7 +336,15 @@ StartServer() {
 			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} has stopped himself"
 		fi
 	else
-		_applog "Err: mumudvb server ${portHttp}:${card}:${tuner} doesn't run"
+		if pid=$(ps -o pid,args --no-headers \
+		-p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
+		grep -sF "${tmpconf}" | \
+		awk '{print $1}'); then
+			_applog "Err: mumudvb server ${portHttp}:${card}:${tuner} is stuck"
+			kill -s TERM ${pid} 2> /dev/null || :
+		else
+			_applog "Err: mumudvb server ${portHttp}:${card}:${tuner} doesn't run"
+		fi
 	fi
 	sleep 2
 	rm -f "${filename_pid}"
@@ -348,10 +352,9 @@ StartServer() {
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
 
-GetAdapter() {
-	# global portHttp card tuner
-	local config="${1}" \
-		dvbtype freq freqmax freqmin pid adapter
+SelectAdapter() {
+	# global config portHttp card tuner
+	local dvbtype freq freqmax freqmin pid adapter
 	eval dvbtype=\"\${config${config}_dvbtype:-}\"
 	eval freq=\"\${config${config}_freq:-}\"
 	while read -r adapter; do
@@ -444,10 +447,10 @@ Main() {
 					continue
 				fi
 				let "config=portHttp-PortHttp,1"
-				GetAdapter ${config} || \
+				SelectAdapter || \
 					continue
 				Servers="${Servers}${portHttp}:${card}:${tuner} "
-				StartServer ${portHttp} ${card} ${tuner} &
+				StartServer &
 				ListStatus
 			elif portHttp="$(sed -nr \
 			-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
