@@ -311,7 +311,7 @@ StartServer() {
 	_applog "Info: starting mumudvb server ${portHttp}:${card}:${tuner}"
 	c=${IdleTimeout}
 	pid=""
-	while ps -o args --no-headers -p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
+	while ps -o args --no-headers -p $(pidof -d ',' /usr/bin/mumudvb) | \
 	grep -qsF "${tmpconf}" && \
 	let "c-=2"; do
 		sleep 2
@@ -336,8 +336,7 @@ StartServer() {
 			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} has stopped himself"
 		fi
 	else
-		if pid=$(ps -o pid,args --no-headers \
-		-p $(pidof /usr/bin/mumudvb | tr -s ' ' ',') | \
+		if pid=$(ps -o pid,args --no-headers -p $(pidof -d ',' /usr/bin/mumudvb) | \
 		grep -sF "${tmpconf}" | \
 		awk '{print $1}'); then
 			_applog "Err: mumudvb server ${portHttp}:${card}:${tuner} is stuck"
@@ -385,7 +384,7 @@ SelectAdapter() {
 	done < <(set | \
 	sed -nre "/^adapter([[:digit:]]+)_dvbtype=${dvbtype}/s//\1/p")
 
-	_applog "Warn: ${portHttp} no more cards available"
+	_applog "Warn: ${portHttp} no more ${dvbtype} cards available"
 	return ${ERR}
 }
 
@@ -464,7 +463,8 @@ Main() {
 				[ -n "${Servers}" ] && \
 					_applog "Warn: can't reload the configuration" \
 						"while there are active servers: ${Servers}" || \
-					LoadConfig
+					LoadConfig || \
+						exit 1
 			elif [ "${line}" = "ListStatus" ]; then
 				ListStatus
 			else
