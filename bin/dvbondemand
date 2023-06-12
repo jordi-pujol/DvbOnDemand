@@ -207,6 +207,10 @@ LoadConfig() {
 			-e '/Info:  DVB:   Frontend : ([[:alnum:]]+)/{s//\1/;p;q}' \
 			-e '${q1}' <<< "${line}")"; then
 				name="$(_trim "${data}")"
+				if [ "${name}" = "Sony CXD2837ER DVB-T/T2/C demodulator" \
+				-a ${tuner} -eq 1 ]; then
+					Blacklist="${Blacklist} ${card}:0"
+				fi
 				eval adapter${adapter}_name='${name}'
 				let "ind++,1"
 			else

@@ -5,9 +5,12 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/bin/bash -c "! /usr/bin/systemctl enabled dvbondemand.service || \
-	( /usr/bin/systemctl status dvbondemand.service && \
-		/usr/bin/systemctl reload dvbondemand.service || \
-		/usr/bin/systemctl restart dvbondemand.service )"
+ExecStart=/bin/bash -c "if /usr/bin/systemctl is-enabled dvbondemand.service; then
+	if /usr/bin/systemctl is-active dvbondemand.service; then
+		/usr/bin/systemctl reload dvbondemand.service
+	else
+		/usr/bin/systemctl restart dvbondemand.service
+	fi
+fi"
 
 [Install]
