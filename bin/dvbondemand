@@ -241,7 +241,7 @@ LoadConfig() {
 				eval adapter${adapter}_freqmin='${data%% *}'
 				eval adapter${adapter}_freqmax='${data##* }'
 				let "Adapters++,1"
-				_applog "Detected ${dvbtype} card ${card}:${tuner} \"${name}\""
+				_applog "Info: Detected ${dvbtype} card ${card}:${tuner} \"${name}\""
 				printf '%s' "${AdapterTypes}" | \
 				grep -qswF "${dvbtype}" || \
 					AdapterTypes="${AdapterTypes}${dvbtype} "
