@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.8 $
+#  $Revision: 1.9 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -142,7 +142,7 @@ LoadConfig() {
 	Debug=""
 	PortHttp=4000
 	LogRotate=3
-	IdleTimeout=20
+	IdleTimeout=60
 	Blacklist=""
 
 	[ ! -s "/etc/default/${NAME}" ] || \
@@ -292,7 +292,7 @@ StartServer() {
 	eval conffile=\"\${config${config}_conffile:-}\"
 	tmpconf="${portHttp}-$(basename "${conffile}")"
 	filename_pid="${portHttp}.pid"
-	log_file="$(basename "${tmpconf}" ".conf").log"
+	log_file="$(basename --suffix ".conf" "${tmpconf}").log"
 	: > "${filename_pid}"
 	: > "${log_file}"
 	chown _mumudvb:video "${filename_pid}" "${log_file}"
@@ -311,7 +311,7 @@ StartServer() {
 	_applog "Info: starting mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}"
 	c=${IdleTimeout}
 	pid=""
-	while ps -o args --no-headers -p $(pidof -d ',' /usr/bin/mumudvb) | \
+	while ps -o args --no-headers -C "mumudvb" | \
 	grep -qsF "${tmpconf}" && \
 	let "c-=2"; do
 		sleep 2
@@ -336,7 +336,7 @@ StartServer() {
 			_applog "Info: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} has stopped himself"
 		fi
 	else
-		if pid=$(ps -o pid,args --no-headers -p $(pidof -d ',' /usr/bin/mumudvb) | \
+		if pid=$(ps -o pid,args --no-headers -C "mumudvb" | \
 		grep -sF "${tmpconf}" | \
 		awk '{print $1}'); then
 			_applog "Err: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} is stuck"
