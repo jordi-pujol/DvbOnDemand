@@ -285,7 +285,7 @@ LoadConfig() {
 }
 
 StartServer() {
-	# global config portHttp card tuner
+	# global config portHttp card tuner dvbtype
 	local conffile tmpconf filename_pid log_file c pid
 
 	RuleClean ${portHttp}
@@ -308,7 +308,7 @@ StartServer() {
 		sed -i -e "1ilog_file=${log_file}" "${tmpconf}"
 
 	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
-	_applog "Info: starting mumudvb server ${portHttp}:${card}:${tuner}"
+	_applog "Info: starting mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}"
 	c=${IdleTimeout}
 	pid=""
 	while ps -o args --no-headers -p $(pidof -d ',' /usr/bin/mumudvb) | \
@@ -321,7 +321,7 @@ StartServer() {
 	done
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
-			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} is running"
+			_applog "Info: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} is running"
 		c=${IdleTimeout}
 		while kill -s 0 ${pid} 2> /dev/null && \
 		let "c-=2"; do
@@ -330,19 +330,19 @@ StartServer() {
 				c=${IdleTimeout}
 		done
 		if kill -s 0 ${pid} 2> /dev/null; then
-			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} is idle. Stopping it"
+			_applog "Info: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} is idle. Stopping it"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			_applog "Info: mumudvb server ${portHttp}:${card}:${tuner} has stopped himself"
+			_applog "Info: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} has stopped himself"
 		fi
 	else
 		if pid=$(ps -o pid,args --no-headers -p $(pidof -d ',' /usr/bin/mumudvb) | \
 		grep -sF "${tmpconf}" | \
 		awk '{print $1}'); then
-			_applog "Err: mumudvb server ${portHttp}:${card}:${tuner} is stuck"
+			_applog "Err: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} is stuck"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			_applog "Err: mumudvb server ${portHttp}:${card}:${tuner} doesn't run"
+			_applog "Err: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} doesn't run"
 		fi
 	fi
 	sleep 2
@@ -352,9 +352,8 @@ StartServer() {
 }
 
 SelectAdapter() {
-	# global config portHttp card tuner
-	local dvbtype freq freqmax freqmin pid adapter
-	eval dvbtype=\"\${config${config}_dvbtype:-}\"
+	# global config portHttp card tuner dvbtype
+	local freq freqmax freqmin pid adapter
 	eval freq=\"\${config${config}_freq:-}\"
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
@@ -415,7 +414,7 @@ Main() {
 	local Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
 	# internal variables, daemon scope
 	local Adapters Configs Servers="" AdapterTypes \
-		reloadConfig line portHttp config card tuner
+		reloadConfig line portHttp config card tuner dvbtype
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -447,6 +446,7 @@ Main() {
 					continue
 				fi
 				let "config=portHttp-PortHttp,1"
+				eval dvbtype=\"\${config${config}_dvbtype:-}\"
 				SelectAdapter || \
 					continue
 				Servers="${Servers}${portHttp}:${card}:${tuner} "
