@@ -441,8 +441,9 @@ Main() {
 				$1 == portHttp {rc=-1; exit}
 				END{exit rc+1}' || \
 				Traffic ${portHttp}; then
-					_applog "Warn: received new request" \
-						"for already active port ${portHttp}"
+					[ -z "${Debug}" ] || \
+						_applog "Warn: received new request" \
+							"for already active port ${portHttp}"
 					continue
 				fi
 				let "config=portHttp-PortHttp,1"

@@ -19,3 +19,8 @@ init-%:
 	$(info checking $* ...)
 	@dash -n debian/$*
 	-@checkbashisms -f debian/$*
+
+override_dh_installsystemd:
+	dh_installsystemd --name=dvbondemand.service dvbondemand.service
+	dh_installsystemd --name=dvbondemand-dev.path dvbondemand-dev.path
+	dh_installsystemd --no-enable --name=dvbondemand-dev.service dvbondemand-dev.service
