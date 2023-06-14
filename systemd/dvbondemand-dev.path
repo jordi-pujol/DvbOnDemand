@@ -4,7 +4,7 @@ Description=Gets audio/video services from several dvb cards.
 
 [Path]
 PathChanged=/dev/dvb/
-PathChanged=/etc/default/dvbondemand
+PathModified=/etc/default/dvbondemand
 Unit=dvbondemand-dev.service
 
 [Install]
