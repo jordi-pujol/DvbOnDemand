@@ -286,7 +286,8 @@ LoadConfig() {
 
 StartServer() {
 	# global config portHttp card tuner dvbtype
-	local conffile tmpconf filename_pid log_file c pid
+	local conffile tmpconf filename_pid log_file c pid \
+		msg="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}"
 
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
@@ -308,7 +309,7 @@ StartServer() {
 		sed -i -e "1ilog_file=${log_file}" "${tmpconf}"
 
 	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
-	_applog "Info: starting mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}"
+	_applog "Info: starting ${msg}"
 	c=${IdleTimeout}
 	pid=""
 	while ps -o args --no-headers -C "mumudvb" | \
@@ -321,7 +322,7 @@ StartServer() {
 	done
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
-			_applog "Info: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} is running"
+			_applog "Info: ${msg} is running"
 		c=${IdleTimeout}
 		while kill -s 0 ${pid} 2> /dev/null && \
 		let "c-=2"; do
@@ -330,19 +331,19 @@ StartServer() {
 				c=${IdleTimeout}
 		done
 		if kill -s 0 ${pid} 2> /dev/null; then
-			_applog "Info: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} is idle. Stopping it"
+			_applog "Info: ${msg} is idle. Stopping it"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			_applog "Info: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} has stopped himself"
+			_applog "Info: ${msg} has stopped himself"
 		fi
 	else
 		if pid=$(ps -o pid,args --no-headers -C "mumudvb" | \
 		grep -sF "${tmpconf}" | \
 		awk '{print $1}'); then
-			_applog "Err: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} is stuck"
+			_applog "Err: ${msg} is stuck"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			_applog "Err: mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner} doesn't run"
+			_applog "Err: ${msg} doesn't run"
 		fi
 	fi
 	sleep 2
@@ -400,18 +401,6 @@ _exit() {
 }
 
 Main() {
-	# constants
-	readonly NAME \
-		STAT="status.txt" \
-		PIPE="pipe" \
-		LOG="log.txt" \
-		IRELOAD="HUP" ISTAT="USR2" \
-		OK=0 ERR=1 TAB=$'\t' NONE=0 \
-		NEWREQUEST="${NAME}New:" \
-		SERVEREND="ServerEnd:" \
-		RELOAD="reloadConfig"
-	# config variables
-	local Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
 	# internal variables, daemon scope
 	local Adapters Configs Servers="" AdapterTypes \
 		reloadConfig line portHttp config card tuner dvbtype
@@ -481,15 +470,52 @@ Main() {
 
 set -o errexit -o nounset -o pipefail +o noglob +o noclobber
 
+# constants
 NAME="$(basename "${0}")"
+readonly NAME \
+	STAT="status.txt" \
+	PIPE="pipe" \
+	LOG="log.txt" \
+	IRELOAD="HUP" ISTAT="USR2" \
+	OK=0 ERR=1 TAB=$'\t' NONE=0 \
+	NEWREQUEST="${NAME}New:" \
+	SERVEREND="ServerEnd:" \
+	RELOAD="reloadConfig"
+# config variables
+declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
 
 case "${1:-}" in
 start)
 	shift
 	Main "${@}"
 	;;
+status)
+	if /usr/bin/systemctl --quiet is-active dvbondemand.service; then \
+		Workdir="/run/${NAME}/"
+		[ ! -s "/etc/default/${NAME}" ] || \
+			. "/etc/default/${NAME}"
+		cd "${Workdir}"
+		d="$(_UTCseconds -r "${STAT}")"
+		echo "Info: Updating status file" >&2
+		/usr/bin/systemctl kill --kill-who=main --signal=USR2 dvbondemand.service >&2
+		c=5
+		while sleep 1;
+		[ $(_UTCseconds -r "${STAT}") -eq ${d} ] && \
+		let "c--"; do
+			:
+		done
+		if [ ${c} -le 0 ]; then
+			echo "Err: Error when updating status file" >&2
+			exit 1
+		fi
+		cat "${STAT}"
+	else
+		echo "Err: Service not active" >&2
+		exit 1
+	fi
+	;;
 *)
-	echo "Wrong arguments" >&2
+	echo "Err: Wrong arguments" >&2
 	exit 1
 	;;
 esac
