@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.9 $
+#  $Revision: 1.10 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -251,34 +251,33 @@ LoadConfig() {
 		esac
 	done < <(/usr/bin/mumudvb --list-cards 2>&1)
 
-	while read -r conffile; do
-		let "Configs++,1"
-		eval config${Configs}_conffile='${conffile}'
-		eval config${Configs}_dvbtype='$(basename "${conffile}" | \
-			cut -f 1 -s -d '_')'
+	for dvbtype in ${AdapterTypes}; do
+		while read -r conffile; do
+			let "Configs++,1"
+			eval config${Configs}_conffile='${conffile}'
+			eval config${Configs}_dvbtype='${dvbtype}'
 
-		name=""
-		service_id=""
-		while read -r line; do
-			case "${line}" in
-			freq=*) eval config${Configs}_freq='${line##*=}' ;;
-			name=*) name="${line##*=}" ;;
-			service_id=*) service_id="${line##*=}" ;;
-			*)
-				[ -n "${name}" -a -n "${service_id}" ] || \
-					continue
+			name=""
+			service_id=""
+			while read -r line; do
+				case "${line}" in
+				freq=*) eval config${Configs}_freq='${line##*=}' ;;
+				name=*) name="${line##*=}" ;;
+				service_id=*) service_id="${line##*=}" ;;
+				*)
+					[ -n "${name}" -a -n "${service_id}" ] || \
+						continue
+					eval config${Configs}_service_${service_id}='${name}'
+					name=""
+					service_id=""
+					;;
+				esac
+			done < "${conffile}"
+			[ -z "${name}" -o -z "${service_id}" ] || \
 				eval config${Configs}_service_${service_id}='${name}'
-				name=""
-				service_id=""
-				;;
-			esac
-		done < "${conffile}"
-		[ -z "${name}" -o -z "${service_id}" ] || \
-			eval config${Configs}_service_${service_id}='${name}'
-		RuleInsert $((PortHttp+Configs))
-	done < <(for dvbtype in ${AdapterTypes}; do
-			ls -1 /etc/mumudvb/${dvbtype}_*.conf 2> /dev/null
-		done)
+			RuleInsert $((PortHttp+Configs))
+		done < <(ls -1 /etc/mumudvb/${dvbtype}_*.conf 2> /dev/null)
+	done
 
 	reloadConfig=""
 	ListStatus
@@ -286,14 +285,16 @@ LoadConfig() {
 
 StartServer() {
 	# global config portHttp card tuner dvbtype
-	local conffile tmpconf filename_pid log_file c pid \
+	local conffile tmpconf filename_pid log_file c pid playlist \
 		msg="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}"
 
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
 	tmpconf="${portHttp}-$(basename "${conffile}")"
+	playlist="$(basename --suffix ".conf" "${conffile}").m3u"
 	filename_pid="${portHttp}.pid"
 	log_file="$(basename --suffix ".conf" "${tmpconf}").log"
+	: > "${playlist}"
 	: > "${filename_pid}"
 	: > "${log_file}"
 	chown _mumudvb:video "${filename_pid}" "${log_file}"
@@ -327,6 +328,20 @@ StartServer() {
 		while kill -s 0 ${pid} 2> /dev/null && \
 		let "c-=2"; do
 			sleep 2
+			if [ ! -s "${playlist}" ]; then
+				if wget --quiet -O "${playlist}" \
+				"http://$(hostname):${portHttp}/playlist.m3u" && \
+				[ $(wc -l < "${playlist}") -gt 1 ]; then
+					_applog "Info: playlist \"${playlist}\" is available"
+					if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
+						[ -s "playlist.m3u" ] && \
+							tail -n +2 "${playlist}" >> "playlist.m3u" || \
+							cp -f "${playlist}" "playlist.m3u"
+					fi
+				else
+					: > "${playlist}"
+				fi
+			fi
 			! Traffic ${portHttp} || \
 				c=${IdleTimeout}
 		done
@@ -448,13 +463,23 @@ Main() {
 					awk -v portHttp="${portHttp}" \
 					'BEGIN{RS=" "; FS=":"}
 					$1 != portHttp {printf $0 " "}')"
-				ListStatus
-			elif [ "${line}" = "${RELOAD}" ]; then
-				[ -n "${Servers}" ] && \
-					_applog "Warn: can't reload the configuration" \
-						"while there are active servers: ${Servers}" || \
+				if [ -z "${Servers}" -a -n "${reloadConfig}" ]; then
 					LoadConfig || \
 						exit 1
+					_applog "Info: configuration reloaded now," \
+						"are not active servers"
+				else
+					ListStatus
+				fi
+			elif [ "${line}" = "${RELOAD}" ]; then
+				if [ -n "${Servers}" ]; then
+					_applog "Warn: active servers: ${Servers}," \
+						"deferring configuration reload"
+					reloadConfig="y"
+				else
+					LoadConfig || \
+						exit 1
+				fi
 			elif [ "${line}" = "ListStatus" ]; then
 				ListStatus
 			else

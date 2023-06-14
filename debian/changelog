@@ -1,6 +1,18 @@
+dvbondemand (1.10) unstable; urgency=medium
+
+   * when mumudvb is started, get all multiplexer playlists,
+    save every one in a file and append to the file playlist.m3u
+   * configuration reload is deferred until there are no servers active.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 14 Jun 2023 11:05:24 +0200
+
 dvbondemand (1.9) unstable; urgency=medium
 
-  * l
+   * user option: dvbondemand status
+   * systemd services to automatic reload or restart the daemon when:
+     - DVB adapters are inserted or removed
+     - the default configuration file has been modified
+   * code improvement
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 13 Jun 2023 11:03:36 +0200
 
