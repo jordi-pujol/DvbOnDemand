@@ -497,7 +497,7 @@ status)
 		cd "${Workdir}"
 		d="$(_UTCseconds -r "${STAT}")"
 		echo "Info: Updating status file" >&2
-		/usr/bin/systemctl kill --kill-who=main --signal=USR2 dvbondemand.service >&2
+		/usr/bin/systemctl kill --kill-who=main --signal=${ISTAT} dvbondemand.service >&2
 		c=5
 		while sleep 1;
 		[ $(_UTCseconds -r "${STAT}") -eq ${d} ] && \
