@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.10 $
+#  $Revision: 1.11 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -52,6 +52,10 @@ _UTCseconds() {
 
 _datetime() {
 	date +'%F %T' "${@}"
+}
+
+_msg() {
+	msg="${@}"
 }
 
 _applog() {
@@ -286,7 +290,8 @@ LoadConfig() {
 StartServer() {
 	# global config portHttp card tuner dvbtype
 	local conffile tmpconf filename_pid log_file c pid playlist \
-		msg="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}"
+		msgSrv="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
+		msg
 
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
@@ -310,7 +315,11 @@ StartServer() {
 		sed -i -e "1ilog_file=${log_file}" "${tmpconf}"
 
 	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
-	_applog "Info: starting ${msg}"
+	msg="Info: starting ${msgSrv}"
+	_applog "${msg}"
+	[ -z "${Debug}" ] || \
+		[ -z "${ExitPoints}" ] || \
+			((OnStart "${msg}") &)
 	c=${IdleTimeout}
 	pid=""
 	while ps -o args --no-headers -C "mumudvb" | \
@@ -323,7 +332,7 @@ StartServer() {
 	done
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
-			_applog "Info: ${msg} is running"
+			_applog "Info: ${msgSrv} is running"
 		c=${IdleTimeout}
 		while kill -s 0 ${pid} 2> /dev/null && \
 		let "c-=2"; do
@@ -332,8 +341,14 @@ StartServer() {
 				if wget --quiet -O "${playlist}" \
 				"http://$(hostname):${portHttp}/playlist.m3u" && \
 				[ $(wc -l < "${playlist}") -gt 1 ]; then
-					_applog "Info: playlist \"${playlist}\" is available"
+					msg="Info: ${msgSrv} is available"
+					_applog "${msg}"
+					[ -z "${ExitPoints}" ] || \
+						((OnAvail "${msg}") &)
 					if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
+						[ -z "${Debug}" ] || \
+							_applog "Info: adding playlist \"${playlist}\"" \
+								"to \"playlist.m3u\""
 						[ -s "playlist.m3u" ] && \
 							tail -n +2 "${playlist}" >> "playlist.m3u" || \
 							cp -f "${playlist}" "playlist.m3u"
@@ -346,22 +361,35 @@ StartServer() {
 				c=${IdleTimeout}
 		done
 		if kill -s 0 ${pid} 2> /dev/null; then
-			_applog "Info: ${msg} is idle. Stopping it"
+			msg="Info: ${msgSrv} is idle. Stopping it"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			_applog "Info: ${msg} has stopped himself"
+			msg="Info: ${msgSrv} has stopped himself"
 		fi
+		_applog "${msg}"
+		[ -z "${ExitPoints}" ] || \
+			((OnStop "${msg}") &)
 	else
 		if pid=$(ps -o pid,args --no-headers -C "mumudvb" | \
 		grep -sF "${tmpconf}" | \
 		awk '{print $1}'); then
-			_applog "Err: ${msg} is stuck"
+			msg="Err: ${msgSrv} is stuck"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			_applog "Err: ${msg} doesn't run"
+			msg="Err: ${msgSrv} doesn't run"
 		fi
+		_applog "${msg}"
+		[ -z "${ExitPoints}" ] || \
+			((OnStartFail "${msg}") &)
 	fi
 	sleep 2
+	[ -z "${pid}" ] || \
+		! kill -s 0 ${pid} 2> /dev/null || {
+			[ -z "${Debug}" ] || \
+				_applog "Err: ${msgSrv} forced stopping"
+			kill -s KILL ${pid} 2> /dev/null || :
+			sleep 2
+		}
 	rm -f "${filename_pid}"
 	RuleInsert ${portHttp}
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
@@ -369,7 +397,7 @@ StartServer() {
 
 SelectAdapter() {
 	# global config portHttp card tuner dvbtype
-	local freq freqmax freqmin pid adapter
+	local freq freqmax freqmin pid adapter msg
 	eval freq=\"\${config${config}_freq:-}\"
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
@@ -389,8 +417,12 @@ SelectAdapter() {
 		eval freqmin=\"\${adapter${adapter}_freqmin:-}\"
 		eval freqmax=\"\${adapter${adapter}_freqmax:-}\"
 		[ ${freqmin} -gt ${freq} -o  ${freq} -gt ${freqmax} ] || {
-			_applog "Info: ${portHttp} selects" \
+			_msg "Info: ${portHttp} selects" \
 				"adapter${card}/frontend${tuner}"
+			_applog "${msg}"
+			[ -z "${Debug}" ] || \
+				[ -z "${ExitPoints}" ] || \
+					((OnSelect "${msg}") &)
 			return ${OK}
 		}
 		[ -z "${Debug}" ] || \
@@ -399,7 +431,10 @@ SelectAdapter() {
 	done < <(set | \
 	sed -nre "/^adapter([[:digit:]]+)_dvbtype=${dvbtype}/s//\1/p")
 
-	_applog "Warn: ${portHttp} no more ${dvbtype} cards available"
+	msg="Warn: ${portHttp} no more ${dvbtype} cards available"
+	_applog "${msg}"
+	[ -z "${ExitPoints}" ] || \
+		((OnNoCardAvail "${msg}") &)
 	return ${ERR}
 }
 
@@ -418,13 +453,19 @@ _exit() {
 Main() {
 	# internal variables, daemon scope
 	local Adapters Configs Servers="" AdapterTypes \
-		reloadConfig line portHttp config card tuner dvbtype
+		reloadConfig line portHttp config card tuner dvbtype clientIP
 
 	trap '_exit' EXIT
 	trap 'exit' INT
 
 	LoadConfig || \
 		exit 1
+
+	ExitPoints=""
+	[ ! -s "/usr/lib/${NAME}/exit-points.sh" ] || {
+		. "/usr/lib/${NAME}/exit-points.sh"
+		ExitPoints="y"
+	}
 
 	trap '[ -n "${reloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
 	trap 'echo "ListStatus" >> "${PIPE}"' "${ISTAT}"
@@ -450,7 +491,14 @@ Main() {
 					continue
 				fi
 				let "config=portHttp-PortHttp,1"
+				clientIP="$(sed -nr \
+					-e "/.*${NEWREQUEST}.*SRC=([[:digit:].]+)[^[:digit:].].*/{s//\1/;p;q}" \
+					<<< "${line}")"
 				eval dvbtype=\"\${config${config}_dvbtype:-}\"
+				msg="Info: client ${clientIP} requests port ${portHttp}"
+				_applog "${msg}"
+				[ -z "${ExitPoints}" ] || \
+					((OnRequest "${msg}") &)
 				SelectAdapter || \
 					continue
 				Servers="${Servers}${portHttp}:${card}:${tuner} "
@@ -482,6 +530,24 @@ Main() {
 				fi
 			elif [ "${line}" = "ListStatus" ]; then
 				ListStatus
+				if [ -n "${Servers}" ]; then
+					printf '%s' "${Servers}" | \
+					tr -s ' ' '\n' | \
+					while IFS=":" read portHttp card tuner; do
+						eval dvbtype=\"\${config$((portHttp-PortHttp))_dvbtype:-}\"
+						_msg="Status:" \
+						"mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
+						"is active"
+						_applog "${msg}"
+						[ -z "${ExitPoints}" ] || \
+							((OnStatus "${msg}") &)
+					done
+				else
+					msg="Status: no servers active"
+					_applog "${msg}"
+					[ -z "${ExitPoints}" ] || \
+						((OnStatus "${msg}") &)
+				fi
 			else
 				[ -z "${Debug}" ] || \
 					_applog "Warn: received invalid data from pipe" \
@@ -507,7 +573,7 @@ readonly NAME \
 	SERVEREND="ServerEnd:" \
 	RELOAD="reloadConfig"
 # config variables
-declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
+declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist ExitPoints
 
 case "${1:-}" in
 start)

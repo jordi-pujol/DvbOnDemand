@@ -1,6 +1,13 @@
+dvbondemand (1.11) unstable; urgency=medium
+
+  * Custom exit points.
+    custom shell functions to execute on daemon events.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 14 Jun 2023 17:04:26 +0200
+
 dvbondemand (1.10) unstable; urgency=medium
 
-   * when mumudvb is started, get all multiplexer playlists,
+   * get multiplexer playlists when mumudvb is started,
     save every one in a file and append to the file playlist.m3u
    * configuration reload is deferred until there are no servers active.
 
