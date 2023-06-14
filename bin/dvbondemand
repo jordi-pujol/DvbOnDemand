@@ -466,8 +466,8 @@ Main() {
 				if [ -z "${Servers}" -a -n "${reloadConfig}" ]; then
 					LoadConfig || \
 						exit 1
-					_applog "Info: configuration reloaded now," \
-						"are not active servers"
+					_applog "Info: configuration reloaded," \
+						"now there are no active servers"
 				else
 					ListStatus
 				fi
