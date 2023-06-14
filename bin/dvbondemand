@@ -535,9 +535,9 @@ Main() {
 					tr -s ' ' '\n' | \
 					while IFS=":" read portHttp card tuner; do
 						eval dvbtype=\"\${config$((portHttp-PortHttp))_dvbtype:-}\"
-						_msg="Status:" \
-						"mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
-						"is active"
+						_msg "Status:" \
+							"mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
+							"is active"
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
 							((OnStatus "${msg}") &)
