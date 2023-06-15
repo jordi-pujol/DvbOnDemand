@@ -63,23 +63,6 @@ _applog() {
 	printf '%s\n' "$(_datetime) ${msg}" >> "${LOG}"
 }
 
-_myIP() {
-	ip -4 route show default 2> /dev/null | \
-		awk 'function isIP(s, a, i) {
-			if (split(s, a, ".") != 4) return
-			for (i in a)
-				if (a[i] !~ /^[[:digit:]]+$/ || a[i] > 255)
-					return
-			return sprintf("%d.%d.%d.%d", a[1], a[2], a[3], a[4])
-		}
-		$NF != "linkdown" \
-		{for (i=1; i < NF; i++)
-			if ($i == "src")
-				if (ip=isIP($(i+1))) {print ip; rc=-1; exit}
-		}
-		END{exit rc+1}'
-}
-
 PreBackupRotate() {
 	local f d=$(_UTCseconds)
 	for f in "${LOG}" "${LOG}.xtrace"; do
@@ -133,7 +116,9 @@ RuleClean() {
 			-e "LOG level info prefix \"${NEWREQUEST}${portHttp:-".*"}\"" \
 			<<< "${rule}"; then
 				iptables -4 --wait --delete INPUT ${n}
-				_applog "Info: removing watch on port ${portHttp}"
+				_applog "Info: removing watch on port ${portHttp:-"$( \
+					sed -snre "/.*\"${NEWREQUEST}([[:digit:]]+)\".*/s//\1/p" \
+					<<< "${rule}")"}"
 				d="y"
 			else
 				let "n++,1"
@@ -208,8 +193,7 @@ LoadConfig() {
 			data="$(sed -nr \
 			-e '/Info:[ ]+DVB:[ =]+Card ([[:digit:]]+) - Tuner ([[:digit:]]+) [=]+/{
 			s//\1 \2/;p;q}' \
-			-e '${q1}' <<< "${line}")" && \
-			! grep -qswF "${data/ /:}" <<< "${Blacklist}" || \
+			-e '${q1}' <<< "${line}")" || \
 				continue
 			let "adapter=Adapters+1,1"
 			card=${data%% *}
@@ -231,6 +215,11 @@ LoadConfig() {
 				if [ "${name}" = "Sony CXD2837ER DVB-T/T2/C demodulator" \
 				-a ${tuner} -eq 1 ]; then
 					Blacklist="${Blacklist} ${card}:0"
+				fi
+				if grep -qswF "${card}:${tuner}" <<< "${Blacklist}"; then
+					_applog "Info: Not using blacklisted ${dvbtype} card ${card}:${tuner} \"${name}\""
+					ind=0
+					continue
 				fi
 				eval adapter${adapter}_name='${name}'
 				let "ind++,1"
@@ -306,7 +295,7 @@ LoadConfig() {
 
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
-	local conffile tmpconf filename_pid log_file c pid playlist \
+	local conffile tmpconf filename_pid log_file c d pid playlist \
 		msgSrv="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
 		msg
 
@@ -351,6 +340,7 @@ StartServer() {
 		[ -z "${Debug}" ] || \
 			_applog "Info: ${msgSrv} is running"
 		c=${IdleTimeout}
+		d=7
 		while kill -s 0 ${pid} 2> /dev/null && \
 		let "c-=2"; do
 			sleep 2
@@ -371,6 +361,13 @@ StartServer() {
 							cp -f "${playlist}" "playlist.m3u"
 					fi
 				else
+					if ! let "d--"; then
+						msg="Warn: ${msgSrv} is stuck"
+						_applog "${msg}"
+						[ -z "${ExitPoints}" ] || \
+							((OnStartFail "${msg}" "${clientIP}") &)
+						d=7
+					fi
 					: > "${playlist}"
 				fi
 			fi
@@ -608,7 +605,8 @@ status)
 	d="$(_UTCseconds -r "${STAT}")"
 	echo "Info: Updating status file" >&2
 	if [ -z "${SSH_CLIENT:-}" ]; then
-		clientIP="$(_myIP)" || :
+		clientIP="$(hostname -I)"
+		clientIP="${clientIP%% *}"
 	else
 		clientIP="${SSH_CLIENT%% *}"
 	fi
