@@ -57,9 +57,13 @@ _datetime() {
 _hostnames() {
 	local host name s=""
 	for host in "${@}"; do
-		name="$(getent hosts "${host%%:*}")"
-		name="${name##* }"
-		printf '%s%s:%s' "${s}" "${name//.$(hostname -d)}" "${host##*:}"
+		if name="$(getent hosts "${host%%:*}")"; then
+			name="${name##* }"
+			name="${name//.$(hostname -d)}:${host##*:}"
+		else
+			name="${host}"
+		fi
+		printf '%s%s' "${s}" "${name}"
 		s=" "
 	done
 }
