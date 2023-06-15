@@ -63,6 +63,23 @@ _applog() {
 	printf '%s\n' "$(_datetime) ${msg}" >> "${LOG}"
 }
 
+_myIP() {
+	ip -4 route show default 2> /dev/null | \
+		awk 'function isIP(s, a, i) {
+			if (split(s, a, ".") != 4) return
+			for (i in a)
+				if (a[i] !~ /^[[:digit:]]+$/ || a[i] > 255)
+					return
+			return sprintf("%d.%d.%d.%d", a[1], a[2], a[3], a[4])
+		}
+		$NF != "linkdown" \
+		{for (i=1; i < NF; i++)
+			if ($i == "src")
+				if (ip=isIP($(i+1))) {print ip; rc=-1; exit}
+		}
+		END{exit rc+1}'
+}
+
 PreBackupRotate() {
 	local f d=$(_UTCseconds)
 	for f in "${LOG}" "${LOG}.xtrace"; do
@@ -288,7 +305,7 @@ LoadConfig() {
 }
 
 StartServer() {
-	# global config portHttp card tuner dvbtype
+	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf filename_pid log_file c pid playlist \
 		msgSrv="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
 		msg
@@ -319,7 +336,7 @@ StartServer() {
 	_applog "${msg}"
 	[ -z "${Debug}" ] || \
 		[ -z "${ExitPoints}" ] || \
-			((OnStart "${msg}") &)
+			((OnStart "${msg}" "${clientIP}") &)
 	c=${IdleTimeout}
 	pid=""
 	while ps -o args --no-headers -C "mumudvb" | \
@@ -344,7 +361,7 @@ StartServer() {
 					msg="Info: ${msgSrv} is available"
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
-						((OnAvail "${msg}") &)
+						((OnAvail "${msg}" "${clientIP}") &)
 					if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
 						[ -z "${Debug}" ] || \
 							_applog "Info: adding playlist \"${playlist}\"" \
@@ -368,7 +385,7 @@ StartServer() {
 		fi
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
-			((OnStop "${msg}") &)
+			((OnStop "${msg}" "${clientIP}") &)
 	else
 		if pid=$(ps -o pid,args --no-headers -C "mumudvb" | \
 		grep -sF "${tmpconf}" | \
@@ -380,7 +397,7 @@ StartServer() {
 		fi
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
-			((OnStartFail "${msg}") &)
+			((OnStartFail "${msg}" "${clientIP}") &)
 	fi
 	sleep 2
 	[ -z "${pid}" ] || \
@@ -396,7 +413,7 @@ StartServer() {
 }
 
 SelectAdapter() {
-	# global config portHttp card tuner dvbtype
+	# global config portHttp card tuner dvbtype clientIP
 	local freq freqmax freqmin pid adapter msg
 	eval freq=\"\${config${config}_freq:-}\"
 	while read -r adapter; do
@@ -422,7 +439,7 @@ SelectAdapter() {
 			_applog "${msg}"
 			[ -z "${Debug}" ] || \
 				[ -z "${ExitPoints}" ] || \
-					((OnSelect "${msg}") &)
+					((OnSelect "${msg}" "${clientIP}") &)
 			return ${OK}
 		}
 		[ -z "${Debug}" ] || \
@@ -434,7 +451,7 @@ SelectAdapter() {
 	msg="Warn: ${portHttp} no more ${dvbtype} cards available"
 	_applog "${msg}"
 	[ -z "${ExitPoints}" ] || \
-		((OnNoCardAvail "${msg}") &)
+		((OnNoCardAvail "${msg}" "${clientIP}") &)
 	return ${ERR}
 }
 
@@ -452,8 +469,8 @@ _exit() {
 
 Main() {
 	# internal variables, daemon scope
-	local Adapters Configs Servers="" AdapterTypes \
-		reloadConfig line portHttp config card tuner dvbtype clientIP
+	local Adapters Configs Servers="" AdapterTypes ExitPoints="" \
+		reloadConfig line portHttp config card tuner dvbtype clientIP msg
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -461,7 +478,6 @@ Main() {
 	LoadConfig || \
 		exit 1
 
-	ExitPoints=""
 	[ ! -s "/usr/lib/${NAME}/exit-points.sh" ] || {
 		. "/usr/lib/${NAME}/exit-points.sh"
 		ExitPoints="y"
@@ -498,7 +514,7 @@ Main() {
 				msg="Info: client ${clientIP} requests port ${portHttp}"
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
-					((OnRequest "${msg}") &)
+					((OnRequest "${msg}" "${clientIP}") &)
 				SelectAdapter || \
 					continue
 				Servers="${Servers}${portHttp}:${card}:${tuner} "
@@ -528,11 +544,10 @@ Main() {
 					LoadConfig || \
 						exit 1
 				fi
-			elif [ "${line}" = "ListStatus" ]; then
+			elif [ "${line%% *}" = "ListStatus" ]; then
 				ListStatus
+				clientIP="${line##* }"
 				if [ -n "${Servers}" ]; then
-					printf '%s' "${Servers}" | \
-					tr -s ' ' '\n' | \
 					while IFS=":" read portHttp card tuner; do
 						eval dvbtype=\"\${config$((portHttp-PortHttp))_dvbtype:-}\"
 						_msg "Status:" \
@@ -540,13 +555,14 @@ Main() {
 							"is active"
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
-							((OnStatus "${msg}") &)
-					done
+							((OnStatus "${msg}" "${clientIP}") &)
+					done < <(printf '%s' "${Servers}" | \
+						tr -s ' ' '\n')
 				else
 					msg="Status: no servers active"
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
-						((OnStatus "${msg}") &)
+						((OnStatus "${msg}" "${clientIP}") &)
 				fi
 			else
 				[ -z "${Debug}" ] || \
@@ -573,7 +589,7 @@ readonly NAME \
 	SERVEREND="ServerEnd:" \
 	RELOAD="reloadConfig"
 # config variables
-declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist ExitPoints
+declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
 
 case "${1:-}" in
 start)
@@ -581,29 +597,33 @@ start)
 	Main "${@}"
 	;;
 status)
-	if /usr/bin/systemctl --quiet is-active dvbondemand.service; then \
-		Workdir="/run/${NAME}/"
-		[ ! -s "/etc/default/${NAME}" ] || \
-			. "/etc/default/${NAME}"
-		cd "${Workdir}"
-		d="$(_UTCseconds -r "${STAT}")"
-		echo "Info: Updating status file" >&2
-		/usr/bin/systemctl kill --kill-who=main --signal=${ISTAT} dvbondemand.service >&2
-		c=5
-		while sleep 1;
-		[ $(_UTCseconds -r "${STAT}") -eq ${d} ] && \
-		let "c--"; do
-			:
-		done
-		if [ ${c} -le 0 ]; then
-			echo "Err: Error when updating status file" >&2
-			exit 1
-		fi
-		cat "${STAT}"
-	else
+	if ! /usr/bin/systemctl --quiet is-active dvbondemand.service; then
 		echo "Err: Service not active" >&2
 		exit 1
 	fi
+	Workdir="/run/${NAME}/"
+	[ ! -s "/etc/default/${NAME}" ] || \
+		. "/etc/default/${NAME}"
+	cd "${Workdir}"
+	d="$(_UTCseconds -r "${STAT}")"
+	echo "Info: Updating status file" >&2
+	if [ -z "${SSH_CLIENT:-}" ]; then
+		clientIP="$(_myIP)" || :
+	else
+		clientIP="${SSH_CLIENT%% *}"
+	fi
+	echo "ListStatus ${clientIP}" >> "${PIPE}"
+	c=5
+	while sleep 1;
+	[ $(_UTCseconds -r "${STAT}") -eq ${d} ] && \
+	let "c--"; do
+		:
+	done
+	if [ ${c} -le 0 ]; then
+		echo "Err: Error when updating status file" >&2
+		exit 1
+	fi
+	cat "${STAT}"
 	;;
 *)
 	echo "Err: Wrong arguments" >&2

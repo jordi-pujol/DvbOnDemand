@@ -31,48 +31,57 @@
 #************************************************************************
 
 EP_Cmd() {
-	local msg="${1}"
-	ssh "jpujol@192.168.45.11" "DISPLAY=:0 notify-send --app-name=dvbondemand -t 10000 '${msg}'"
+	local msg="${1}" \
+		clientIP="${2:-"192.168.45.11"}"
+	ssh "jpujol@${clientIP}" "DISPLAY=:0 notify-send --app-name=dvbondemand -t 10000 '${msg}'"
 }
 
 OnRequest() {
-	local msg="${1}"
-	EP_Cmd "${1}"
+	local msg="${1}" \
+		clientIP="${2}"
+	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnSelect() {
-	local msg="${1}"
-	EP_Cmd "${1}"
+	local msg="${1}" \
+		clientIP="${2}"
+	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnStart() {
-	local msg="${1}"
-	EP_Cmd "${1}"
+	local msg="${1}" \
+		clientIP="${2}"
+	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnStartFail() {
-	local msg="${1}"
-	EP_Cmd "${1}"
+	local msg="${1}" \
+		clientIP="${2}"
+	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnAvail() {
-	local msg="${1}"
-	EP_Cmd "${1}"
+	local msg="${1}" \
+		clientIP="${2}"
+	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnStop() {
-	local msg="${1}"
-	EP_Cmd "${1}"
+	local msg="${1}" \
+		clientIP="${2}"
+	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnNoCardAvail() {
-	local msg="${1}"
-	EP_Cmd "${1}"
+	local msg="${1}" \
+		clientIP="${2}"
+	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnStatus() {
-	local msg="${1}"
-	EP_Cmd "${1}"
+	local msg="${1}" \
+		clientIP="${2}"
+	EP_Cmd "${msg}" "${clientIP}"
 }
 
 :
