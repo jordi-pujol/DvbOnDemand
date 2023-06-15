@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.11 $
+#  $Revision: 1.12 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -54,6 +54,16 @@ _datetime() {
 	date +'%F %T' "${@}"
 }
 
+_hostnames() {
+	local host name s=""
+	for host in "${@}"; do
+		name="$(getent hosts "${host%%:*}")"
+		name="${name##* }"
+		printf '%s%s:%s' "${s}" "${name//.$(hostname -d)}" "${host##*:}"
+		s=" "
+	done
+}
+
 _msg() {
 	msg="${@}"
 }
@@ -83,16 +93,19 @@ BackupRotate() {
 }
 
 Traffic() {
-	local portHttp=${1}
-	ss --no-header --numeric --tcp state established sport ${portHttp} | \
-		grep -qswF ${portHttp}
+	local portHttp=${1} \
+		connections
+	connections="$(ss --no-header --numeric --tcp state established sport ${portHttp} | \
+			sed -r -e '/.* ([^ ]+)$/s//\1/' | sort)"
+	[ -n "${connections}" ] && \
+		echo ${connections}
 }
 
 RuleInsert() {
 	local portHttp="${1}" \
 		config conffile
 	[ -z "${Debug}" ] || \
-		! Traffic ${portHttp} || \
+		! Traffic ${portHttp} > /dev/null || \
 			_applog "Warn: will set watch on port ${portHttp}" \
 				"when server is already active"
 	iptables -4 --wait -I INPUT -p tcp -m tcp \
@@ -296,6 +309,7 @@ LoadConfig() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf filename_pid log_file c d pid playlist \
+		clients client connections \
 		msgSrv="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
 		msg
 
@@ -339,6 +353,7 @@ StartServer() {
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
 			_applog "Info: ${msgSrv} is running"
+		clients=""
 		c=${IdleTimeout}
 		d=7
 		while kill -s 0 ${pid} 2> /dev/null && \
@@ -371,8 +386,42 @@ StartServer() {
 					: > "${playlist}"
 				fi
 			fi
-			! Traffic ${portHttp} || \
+			if connections="$(Traffic ${portHttp})"; then
 				c=${IdleTimeout}
+				if [ "${clients}" != "${connections}" ]; then
+					for client in ${connections}; do
+						! grep -qswF "${client}" <<< "${clients}" || \
+							continue
+						_msg "Info: ${msgSrv} Open:\"$(_hostnames ${client})\"" \
+							"Clients:\"$(_hostnames ${connections})\""
+						_applog "${msg}"
+						[ -z "${ExitPoints}" ] || \
+							((OnConnect "${msg}" \
+								$(printf '%s\n' ${clientIP} ${connections} | \
+								cut -f 1 -d ':' | sort -u)) &)
+					done
+					for client in ${clients}; do
+						! grep -qswF "${client}" <<< "${connections}" || \
+							continue
+						_msg "Info: ${msgSrv} Close:\"$(_hostnames ${client})\"" \
+							"Clients:\"$(_hostnames ${connections})\""
+						_applog "${msg}"
+						[ -z "${ExitPoints}" ] || \
+							((OnDisconnect "${msg}" \
+								$(printf '%s\n' ${clientIP} ${clients} ${connections} | \
+								cut -f 1 -d ':' | sort -u)) &)
+					done
+					clients="${connections}"
+				fi
+			elif [ -n "${clients}" ]; then
+				msg="Info: ${msgSrv} All closed:\"$(_hostnames ${clients})\""
+				_applog "${msg}"
+				[ -z "${ExitPoints}" ] || \
+					((OnDisconnect "${msg}" \
+						$(printf '%s\n' ${clientIP} ${clients} | \
+						cut -f 1 -d ':' | sort -u)) &)
+				clients=""
+			fi
 		done
 		if kill -s 0 ${pid} 2> /dev/null; then
 			msg="Info: ${msgSrv} is idle. Stopping it"
@@ -497,7 +546,7 @@ Main() {
 				'BEGIN{RS=" "; FS=":"}
 				$1 == portHttp {rc=-1; exit}
 				END{exit rc+1}' || \
-				Traffic ${portHttp}; then
+				Traffic ${portHttp} > /dev/null; then
 					[ -z "${Debug}" ] || \
 						_applog "Warn: received new request" \
 							"for already active port ${portHttp}"
@@ -508,7 +557,7 @@ Main() {
 					-e "/.*${NEWREQUEST}.*SRC=([[:digit:].]+)[^[:digit:].].*/{s//\1/;p;q}" \
 					<<< "${line}")"
 				eval dvbtype=\"\${config${config}_dvbtype:-}\"
-				msg="Info: client ${clientIP} requests port ${portHttp}"
+				msg="Info: client $(_hostnames ${clientIP}) requests port ${portHttp}"
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
 					((OnRequest "${msg}" "${clientIP}") &)
@@ -527,15 +576,14 @@ Main() {
 				if [ -z "${Servers}" -a -n "${reloadConfig}" ]; then
 					LoadConfig || \
 						exit 1
-					_applog "Info: configuration reloaded," \
-						"now there are no active servers"
+					_applog "Info: configuration reloaded"
 				else
 					ListStatus
 				fi
 			elif [ "${line}" = "${RELOAD}" ]; then
 				if [ -n "${Servers}" ]; then
-					_applog "Warn: active servers: ${Servers}," \
-						"deferring configuration reload"
+					_applog "Warn: deferring configuration reload." \
+						"Active servers: ${Servers}"
 					reloadConfig="y"
 				else
 					LoadConfig || \

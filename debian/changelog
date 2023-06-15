@@ -1,3 +1,9 @@
+dvbondemand (1.12) unstable; urgency=medium
+
+  * track clients connection and disconnection
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 15 Jun 2023 09:05:51 +0200
+
 dvbondemand (1.11) unstable; urgency=medium
 
   * Custom exit points.

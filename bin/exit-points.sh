@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.11 $
+#  $Revision: 1.12 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -32,55 +32,91 @@
 
 EP_Cmd() {
 	local msg="${1}" \
-		clientIP="${2:-"192.168.45.11"}"
-	ssh "jpujol@${clientIP}" "DISPLAY=:0 notify-send --app-name=dvbondemand -t 10000 '${msg}'"
+		clientIP="${2:-"192.168.45.11"}" \
+		ip
+	for ip in ${clientIP}; do
+		ssh "jpujol@${ip}" \
+			"DISPLAY=:0 notify-send --app-name=dvbondemand -t 10000 '${msg}'"
+	done
 }
 
 OnRequest() {
 	local msg="${1}" \
-		clientIP="${2}"
+		clientIP
+	shift
+	clientIP="${@}"
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnSelect() {
 	local msg="${1}" \
-		clientIP="${2}"
+		clientIP
+	shift
+	clientIP="${@}"
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnStart() {
 	local msg="${1}" \
-		clientIP="${2}"
+		clientIP
+	shift
+	clientIP="${@}"
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnStartFail() {
 	local msg="${1}" \
-		clientIP="${2}"
+		clientIP
+	shift
+	clientIP="${@}"
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnAvail() {
 	local msg="${1}" \
-		clientIP="${2}"
+		clientIP
+	shift
+	clientIP="${@}"
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnStop() {
 	local msg="${1}" \
-		clientIP="${2}"
+		clientIP
+	shift
+	clientIP="${@}"
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnNoCardAvail() {
 	local msg="${1}" \
-		clientIP="${2}"
+		clientIP
+	shift
+	clientIP="${@}"
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
 OnStatus() {
 	local msg="${1}" \
-		clientIP="${2}"
+		clientIP
+	shift
+	clientIP="${@}"
+	EP_Cmd "${msg}" "${clientIP}"
+}
+
+OnConnect() {
+	local msg="${1}" \
+		clientIP
+	shift
+	clientIP="${@}"
+	EP_Cmd "${msg}" "${clientIP}"
+}
+
+OnDisconnect() {
+	local msg="${1}" \
+		clientIP
+	shift
+	clientIP="${@}"
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
