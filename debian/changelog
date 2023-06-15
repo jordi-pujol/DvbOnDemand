@@ -2,24 +2,26 @@ dvbondemand (1.11) unstable; urgency=medium
 
   * Custom exit points.
     custom shell functions to execute on daemon events.
+  * dvbondemand status
+    gets the client IP and writes a status update request to the pipe.
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 14 Jun 2023 17:04:26 +0200
 
 dvbondemand (1.10) unstable; urgency=medium
 
-   * get multiplexer playlists when mumudvb is started,
+  * get multiplexer playlists when mumudvb is started,
     save every one in a file and append to the file playlist.m3u
-   * configuration reload is deferred until there are no servers active.
+  * configuration reload is deferred until there are no servers active.
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 14 Jun 2023 11:05:24 +0200
 
 dvbondemand (1.9) unstable; urgency=medium
 
-   * user option: dvbondemand status
-   * systemd services to automatic reload or restart the daemon when:
-     - DVB adapters are inserted or removed
-     - the default configuration file has been modified
-   * code improvement
+  * user option: dvbondemand status
+  * systemd services to automatic reload or restart the daemon when:
+    - DVB adapters are inserted or removed
+    - the default configuration file has been modified
+  * code improvement
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 13 Jun 2023 11:03:36 +0200
 
