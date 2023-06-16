@@ -104,15 +104,7 @@ OnStatus() {
 	EP_Cmd "${msg}" "${clientIP}"
 }
 
-OnConnect() {
-	local msg="${1}" \
-		clientIP
-	shift
-	clientIP="${@}"
-	EP_Cmd "${msg}" "${clientIP}"
-}
-
-OnDisconnect() {
+OnConnection() {
 	local msg="${1}" \
 		clientIP
 	shift

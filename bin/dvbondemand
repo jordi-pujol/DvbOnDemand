@@ -83,12 +83,11 @@ BackupRotate() {
 }
 
 Traffic() {
-	local portHttp=${1} \
-		connections
-	connections="$(ss --no-header --numeric --tcp state established sport ${portHttp} | \
-			sed -r -e '/.* ([^ ]+)$/s//\1/' | sort)"
-	[ -n "${connections}" ] && \
-		echo ${connections}
+	local portHttp=${1}
+	ss --no-header --numeric --tcp state established sport ${portHttp} | \
+		awk '{print $NF; rc=-1}
+		END{exit rc+1}' | \
+		sort
 }
 
 RuleInsert() {
@@ -315,11 +314,11 @@ LoadConfig() {
 ClientsDiff() {
 	local clientsA="${1}" \
 		clientsB="${2}"
-	test -n "${clientsA}" && \
+	test -z "${clientsA}" || \
 		if test -n "${clientsB}"; then
 			printf '%s\n' ${clientsA} | \
 				grep -svxF "$(printf '%s\n' ${clientsB})" | \
-				tr -s '[[:space:]]' ' '
+				tr -s '[[:space:]]' ' ' || :
 		else
 			printf '%s\n' "${clientsA}"
 		fi
@@ -328,7 +327,7 @@ ClientsDiff() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf filename_pid log_file c d pid playlist \
-		clients client connections \
+		clients clientOpen clientClose connections \
 		msgSrv="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
 		msg
 
@@ -408,32 +407,27 @@ StartServer() {
 			if connections="$(Traffic ${portHttp})"; then
 				c=${IdleTimeout}
 				if [ "${clients}" != "${connections}" ]; then
-					if client="$(ClientsDiff "${clients}" "${connections}")"; then
-						_msg "Info: ${msgSrv} Close:\"$(Hostnames ${client})\"" \
-							"Clients:\"$(Hostnames ${connections})\""
-						_applog "${msg}"
-						[ -z "${ExitPoints}" ] || \
-							((OnDisconnect "${msg}" \
-								$(printf '%s\n' ${clientIP} ${connections} ${clients} | \
-								cut -f 1 -d ':' | sort --unique)) &)
-					fi
-					if client="$(ClientsDiff "${connections}" "${clients}")"; then
-						_msg "Info: ${msgSrv} Open:\"$(Hostnames ${client})\"" \
-							"Clients:\"$(Hostnames ${connections})\""
-						_applog "${msg}"
-						[ -z "${ExitPoints}" ] || \
-							((OnConnect "${msg}" \
-								$(printf '%s\n' ${clientIP} ${connections} ${clients} | \
-								cut -f 1 -d ':' | sort --unique)) &)
-					fi
+					clientOpen="$(ClientsDiff "${connections}" "${clients}")"
+					clientClose="$(ClientsDiff "${clients}" "${connections}")"
+					_msg "Info: ${msgSrv}" \
+						"$(test -z "${clientClose}" || \
+						echo "Close:\"$(Hostnames ${clientClose})\"")" \
+						"$(test -z "${clientOpen}" || \
+						echo "Open:\"$(Hostnames ${clientOpen})\"")" \
+						"Clients:\"$(Hostnames ${connections})\""
+					_applog "${msg}"
+					[ -z "${ExitPoints}" ] || \
+						((OnConnection "${msg}" \
+							$(printf '%s\n' ${connections} ${clients} | \
+							cut -f 1 -d ':' | sort --unique)) &)
 					clients="${connections}"
 				fi
 			elif [ -n "${clients}" ]; then
 				msg="Info: ${msgSrv} All closed:\"$(Hostnames ${clients})\""
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
-					((OnDisconnect "${msg}" \
-						$(printf '%s\n' ${clientIP} ${clients} | \
+					((OnConnection "${msg}" \
+						$(printf '%s\n' ${clients} | \
 						cut -f 1 -d ':' | sort --unique)) &)
 				clients=""
 			fi

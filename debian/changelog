@@ -1,7 +1,7 @@
 dvbondemand (1.14) unstable; urgency=medium
 
   * when receiving a request for the daemon status
-    list active servers and also list their connected clients
+    list active servers and also list connected clients
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 16 Jun 2023 14:34:29 +0200
 
