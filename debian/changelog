@@ -1,3 +1,9 @@
+dvbondemand (1.13) unstable; urgency=medium
+
+  * improve client tracking.
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 16 Jun 2023 11:28:04 +0200
+
 dvbondemand (1.12) unstable; urgency=medium
 
   * track clients connection and disconnection

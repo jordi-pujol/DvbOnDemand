@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.12 $
+#  $Revision: 1.13 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -314,16 +314,15 @@ LoadConfig() {
 
 ClientsDiff() {
 	local clientsA="${1}" \
-		clientsB="${2}" \
-		client f=""
-	for client in ${clientsA}; do
-		printf '%s\n' ${clientsB} | \
-		grep -qsxF "${client}" || {
-			printf '%s ' "${client}"
-			f="y"
-		}
-	done
-	test -n "${f}"
+		clientsB="${2}"
+	test -n "${clientsA}" && \
+		if test -n "${clientsB}"; then
+			printf '%s\n' ${clientsA} | \
+				grep -svxF "$(printf '%s\n' ${clientsB})" | \
+				tr -s '[[:space:]]' ' '
+		else
+			echo ${clientsA}
+		fi
 }
 
 StartServer() {
@@ -409,21 +408,21 @@ StartServer() {
 			if connections="$(Traffic ${portHttp})"; then
 				c=${IdleTimeout}
 				if [ "${clients}" != "${connections}" ]; then
-					if client="$(ClientsDiff "${connections}" "${clients}")"; then
-						_msg "Info: ${msgSrv} Open:\"$(Hostnames ${client})\"" \
-							"Clients:\"$(Hostnames ${connections})\""
-						_applog "${msg}"
-						[ -z "${ExitPoints}" ] || \
-							((OnConnect "${msg}" \
-								$(printf '%s\n' ${clientIP} ${connections} ${clients} | \
-								cut -f 1 -d ':' | sort --unique)) &)
-					fi
 					if client="$(ClientsDiff "${clients}" "${connections}")"; then
 						_msg "Info: ${msgSrv} Close:\"$(Hostnames ${client})\"" \
 							"Clients:\"$(Hostnames ${connections})\""
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
 							((OnDisconnect "${msg}" \
+								$(printf '%s\n' ${clientIP} ${connections} ${clients} | \
+								cut -f 1 -d ':' | sort --unique)) &)
+					fi
+					if client="$(ClientsDiff "${connections}" "${clients}")"; then
+						_msg "Info: ${msgSrv} Open:\"$(Hostnames ${client})\"" \
+							"Clients:\"$(Hostnames ${connections})\""
+						_applog "${msg}"
+						[ -z "${ExitPoints}" ] || \
+							((OnConnect "${msg}" \
 								$(printf '%s\n' ${clientIP} ${connections} ${clients} | \
 								cut -f 1 -d ':' | sort --unique)) &)
 					fi
