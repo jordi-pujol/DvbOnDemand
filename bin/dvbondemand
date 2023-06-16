@@ -395,9 +395,7 @@ StartServer() {
 			if connections="$(Traffic ${portHttp})"; then
 				c=${IdleTimeout}
 				if [ "${clients}" != "${connections}" ]; then
-					for client in ${connections}; do
-						! grep -qswF "${client}" <<< "${clients}" || \
-							continue
+					if client="$(grep -svwF "$(printf '%s\n' ${connections})" <<< "${clients}")"; then
 						_msg "Info: ${msgSrv} Open:\"$(Hostnames ${client})\"" \
 							"Clients:\"$(Hostnames ${connections})\""
 						_applog "${msg}"
@@ -405,10 +403,8 @@ StartServer() {
 							((OnConnect "${msg}" \
 								$(printf '%s\n' ${clientIP} ${connections} | \
 								cut -f 1 -d ':' | sort -u)) &)
-					done
-					for client in ${clients}; do
-						! grep -qswF "${client}" <<< "${connections}" || \
-							continue
+					fi
+					if client="$(grep -svwF "$(printf '%s\n' ${clients})" <<< "${connections}")"; then
 						_msg "Info: ${msgSrv} Close:\"$(Hostnames ${client})\"" \
 							"Clients:\"$(Hostnames ${connections})\""
 						_applog "${msg}"
@@ -416,7 +412,7 @@ StartServer() {
 							((OnDisconnect "${msg}" \
 								$(printf '%s\n' ${clientIP} ${clients} ${connections} | \
 								cut -f 1 -d ':' | sort -u)) &)
-					done
+					fi
 					clients="${connections}"
 				fi
 			elif [ -n "${clients}" ]; then
