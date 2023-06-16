@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.13 $
+#  $Revision: 1.14 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -321,7 +321,7 @@ ClientsDiff() {
 				grep -svxF "$(printf '%s\n' ${clientsB})" | \
 				tr -s '[[:space:]]' ' '
 		else
-			echo ${clientsA}
+			printf '%s\n' "${clientsA}"
 		fi
 }
 
@@ -613,6 +613,16 @@ Main() {
 						_msg "Status:" \
 							"mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
 							"is active"
+						_applog "${msg}"
+						[ -z "${ExitPoints}" ] || \
+							((OnStatus "${msg}" "${clientIP}") &)
+						if connections="$(Traffic ${portHttp})"; then
+							_msg "Status:" \
+							"Server ${portHttp}, clients: $(Hostnames ${connections})"
+						else
+							_msg "Status:" \
+							"Server ${portHttp}, no clients connected"
+						fi
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
 							((OnStatus "${msg}" "${clientIP}") &)
