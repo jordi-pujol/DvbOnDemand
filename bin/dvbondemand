@@ -54,20 +54,6 @@ _datetime() {
 	date +'%F %T' "${@}"
 }
 
-_hostnames() {
-	local host name s=""
-	for host in "${@}"; do
-		if name="$(getent hosts "${host%%:*}")"; then
-			name="${name##* }"
-			name="${name//.$(hostname -d)}:${host##*:}"
-		else
-			name="${host}"
-		fi
-		printf '%s%s' "${s}" "${name}"
-		s=" "
-	done
-}
-
 _msg() {
 	msg="${@}"
 }
@@ -144,11 +130,27 @@ RuleClean() {
 	done
 }
 
+Hostnames() {
+	local host name s=""
+	for host in "${@}"; do
+		if name="$(getent hosts "${host%%:*}")"; then
+			name="${name##* }"
+			name="${name//.$(hostname -d)}"
+			[ -z "$(cut -f 2 -s -d ':' <<< "${host}")" ] || \
+				name="${name}:${host##*:}"
+		else
+			name="${host}"
+		fi
+		printf '%s%s' "${s}" "${name}"
+		s=" "
+	done
+}
+
 ListStatus() {
+	exec > "${STAT}"
 	set | sed -nre "/\(\)[[:blank:]]*$/d" \
 		-e '/^(adapter|config)[[:digit:]]*_/p' \
-		-e '/^[[:upper:]][[:lower:]]/p' \
-		> "${STAT}"
+		-e '/^[[:upper:]][[:lower:]]/p'
 }
 
 LoadConfig() {
@@ -307,7 +309,7 @@ LoadConfig() {
 	done
 
 	reloadConfig=""
-	ListStatus
+	ListStatus &
 }
 
 StartServer() {
@@ -396,8 +398,8 @@ StartServer() {
 					for client in ${connections}; do
 						! grep -qswF "${client}" <<< "${clients}" || \
 							continue
-						_msg "Info: ${msgSrv} Open:\"$(_hostnames ${client})\"" \
-							"Clients:\"$(_hostnames ${connections})\""
+						_msg "Info: ${msgSrv} Open:\"$(Hostnames ${client})\"" \
+							"Clients:\"$(Hostnames ${connections})\""
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
 							((OnConnect "${msg}" \
@@ -407,8 +409,8 @@ StartServer() {
 					for client in ${clients}; do
 						! grep -qswF "${client}" <<< "${connections}" || \
 							continue
-						_msg "Info: ${msgSrv} Close:\"$(_hostnames ${client})\"" \
-							"Clients:\"$(_hostnames ${connections})\""
+						_msg "Info: ${msgSrv} Close:\"$(Hostnames ${client})\"" \
+							"Clients:\"$(Hostnames ${connections})\""
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
 							((OnDisconnect "${msg}" \
@@ -418,7 +420,7 @@ StartServer() {
 					clients="${connections}"
 				fi
 			elif [ -n "${clients}" ]; then
-				msg="Info: ${msgSrv} All closed:\"$(_hostnames ${clients})\""
+				msg="Info: ${msgSrv} All closed:\"$(Hostnames ${clients})\""
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
 					((OnDisconnect "${msg}" \
@@ -561,7 +563,7 @@ Main() {
 					-e "/.*${NEWREQUEST}.*SRC=([[:digit:].]+)[^[:digit:].].*/{s//\1/;p;q}" \
 					<<< "${line}")"
 				eval dvbtype=\"\${config${config}_dvbtype:-}\"
-				msg="Info: client $(_hostnames ${clientIP}) requests port ${portHttp}"
+				msg="Info: client $(Hostnames ${clientIP}) requests port ${portHttp}"
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
 					((OnRequest "${msg}" "${clientIP}") &)
@@ -569,7 +571,7 @@ Main() {
 					continue
 				Servers="${Servers}${portHttp}:${card}:${tuner} "
 				StartServer &
-				ListStatus
+				ListStatus &
 			elif portHttp="$(sed -nr \
 			-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
 			-e '${q1}' <<< "${line}")"; then
@@ -582,7 +584,7 @@ Main() {
 						exit 1
 					_applog "Info: configuration reloaded"
 				else
-					ListStatus
+					ListStatus &
 				fi
 			elif [ "${line}" = "${RELOAD}" ]; then
 				if [ -n "${Servers}" ]; then
@@ -594,7 +596,7 @@ Main() {
 						exit 1
 				fi
 			elif [ "${line%% *}" = "ListStatus" ]; then
-				ListStatus
+				ListStatus &
 				clientIP="${line##* }"
 				if [ -n "${Servers}" ]; then
 					while IFS=":" read portHttp card tuner; do
