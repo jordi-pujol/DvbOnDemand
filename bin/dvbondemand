@@ -312,6 +312,20 @@ LoadConfig() {
 	ListStatus &
 }
 
+ClientsDiff() {
+	local clientsA="${1}" \
+		clientsB="${2}" \
+		client f=""
+	for client in ${clientsA}; do
+		printf '%s\n' ${clientsB} | \
+		grep -qsxF "${client}" || {
+			printf '%s ' "${client}"
+			f="y"
+		}
+	done
+	test -n "${f}"
+}
+
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf filename_pid log_file c d pid playlist \
@@ -395,23 +409,23 @@ StartServer() {
 			if connections="$(Traffic ${portHttp})"; then
 				c=${IdleTimeout}
 				if [ "${clients}" != "${connections}" ]; then
-					if client="$(grep -svwF "$(printf '%s\n' ${connections})" <<< "${clients}")"; then
+					if client="$(ClientsDiff "${connections}" "${clients}")"; then
 						_msg "Info: ${msgSrv} Open:\"$(Hostnames ${client})\"" \
 							"Clients:\"$(Hostnames ${connections})\""
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
 							((OnConnect "${msg}" \
-								$(printf '%s\n' ${clientIP} ${connections} | \
-								cut -f 1 -d ':' | sort -u)) &)
+								$(printf '%s\n' ${clientIP} ${connections} ${clients} | \
+								cut -f 1 -d ':' | sort --unique)) &)
 					fi
-					if client="$(grep -svwF "$(printf '%s\n' ${clients})" <<< "${connections}")"; then
+					if client="$(ClientsDiff "${clients}" "${connections}")"; then
 						_msg "Info: ${msgSrv} Close:\"$(Hostnames ${client})\"" \
 							"Clients:\"$(Hostnames ${connections})\""
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
 							((OnDisconnect "${msg}" \
-								$(printf '%s\n' ${clientIP} ${clients} ${connections} | \
-								cut -f 1 -d ':' | sort -u)) &)
+								$(printf '%s\n' ${clientIP} ${connections} ${clients} | \
+								cut -f 1 -d ':' | sort --unique)) &)
 					fi
 					clients="${connections}"
 				fi
@@ -421,7 +435,7 @@ StartServer() {
 				[ -z "${ExitPoints}" ] || \
 					((OnDisconnect "${msg}" \
 						$(printf '%s\n' ${clientIP} ${clients} | \
-						cut -f 1 -d ':' | sort -u)) &)
+						cut -f 1 -d ':' | sort --unique)) &)
 				clients=""
 			fi
 		done
@@ -559,7 +573,7 @@ Main() {
 					-e "/.*${NEWREQUEST}.*SRC=([[:digit:].]+)[^[:digit:].].*/{s//\1/;p;q}" \
 					<<< "${line}")"
 				eval dvbtype=\"\${config${config}_dvbtype:-}\"
-				msg="Info: client $(Hostnames ${clientIP}) requests port ${portHttp}"
+				msg="Info: $(Hostnames ${clientIP}) requests port ${portHttp}"
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
 					((OnRequest "${msg}" "${clientIP}") &)
