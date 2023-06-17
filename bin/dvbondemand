@@ -112,7 +112,7 @@ RuleClean() {
 	until [ -z "${d}" ]; do
 		d=""
 		n=1
-		while rule="$(iptables -4 --wait --list INPUT ${n})" && \
+		while rule="$(iptables -4 --wait --numeric --list INPUT ${n})" && \
 		[ -n "${rule}" ]; do
 			if grep -qs \
 			-e "LOG level info prefix \"${NEWREQUEST}${portHttp:-".*"}\"" \
@@ -314,21 +314,24 @@ LoadConfig() {
 ClientsDiff() {
 	local clientsA="${1}" \
 		clientsB="${2}"
-	test -z "${clientsA}" || \
+	test -n "${clientsA}" && \
 		if test -n "${clientsB}"; then
 			printf '%s\n' ${clientsA} | \
 				grep -svxF "$(printf '%s\n' ${clientsB})" | \
-				tr -s '[[:space:]]' ' ' || :
+				tr -s '[[:space:]]' ' '
 		else
 			printf '%s\n' "${clientsA}"
 		fi
 }
 
+ServerName() {
+	echo "mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}"
+}
+
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf filename_pid log_file c d pid playlist \
-		clients clientOpen clientClose connections \
-		msgSrv="mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
+		clients client connections \
 		msg
 
 	RuleClean ${portHttp}
@@ -353,7 +356,7 @@ StartServer() {
 		sed -i -e "1ilog_file=${log_file}" "${tmpconf}"
 
 	/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
-	msg="Info: starting ${msgSrv}"
+	msg="Info: starting $(ServerName)"
 	_applog "${msg}"
 	[ -z "${Debug}" ] || \
 		[ -z "${ExitPoints}" ] || \
@@ -370,7 +373,7 @@ StartServer() {
 	done
 	if [ -n "${pid}" ]; then
 		[ -z "${Debug}" ] || \
-			_applog "Info: ${msgSrv} is running"
+			_applog "Info: $(ServerName) is running"
 		clients=""
 		c=${IdleTimeout}
 		d=7
@@ -381,7 +384,7 @@ StartServer() {
 				if wget --quiet -O "${playlist}" \
 				"http://$(hostname):${portHttp}/playlist.m3u" && \
 				[ $(wc -l < "${playlist}") -gt 1 ]; then
-					msg="Info: ${msgSrv} is available"
+					msg="Info: $(ServerName) is available"
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
 						((OnAvail "${msg}" "${clientIP}") &)
@@ -395,7 +398,7 @@ StartServer() {
 					fi
 				else
 					if ! let "d--"; then
-						msg="Warn: ${msgSrv} is stuck"
+						msg="Warn: $(ServerName) is stuck"
 						_applog "${msg}"
 						[ -z "${ExitPoints}" ] || \
 							((OnStartFail "${msg}" "${clientIP}") &)
@@ -407,14 +410,14 @@ StartServer() {
 			if connections="$(Traffic ${portHttp})"; then
 				c=${IdleTimeout}
 				if [ "${clients}" != "${connections}" ]; then
-					clientOpen="$(ClientsDiff "${connections}" "${clients}")"
-					clientClose="$(ClientsDiff "${clients}" "${connections}")"
-					_msg "Info: ${msgSrv}" \
-						"$(test -z "${clientClose}" || \
-						echo "Close:\"$(Hostnames ${clientClose})\"")" \
-						"$(test -z "${clientOpen}" || \
-						echo "Open:\"$(Hostnames ${clientOpen})\"")" \
-						"Clients:\"$(Hostnames ${connections})\""
+					msg="Info: $(ServerName)"
+					if client="$(ClientsDiff "${clients}" "${connections}")"; then
+						msg="${msg},${LF}Close:\"$(Hostnames ${client})\""
+					fi
+					if client="$(ClientsDiff "${connections}" "${clients}")"; then
+						msg="${msg},${LF}Open:\"$(Hostnames ${client})\""
+					fi
+					msg="${msg},${LF}Clients:\"$(Hostnames ${connections})\""
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
 						((OnConnection "${msg}" \
@@ -423,7 +426,7 @@ StartServer() {
 					clients="${connections}"
 				fi
 			elif [ -n "${clients}" ]; then
-				msg="Info: ${msgSrv} All closed:\"$(Hostnames ${clients})\""
+				msg="Info: $(ServerName) All closed:\"$(Hostnames ${clients})\""
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
 					((OnConnection "${msg}" \
@@ -433,10 +436,10 @@ StartServer() {
 			fi
 		done
 		if kill -s 0 ${pid} 2> /dev/null; then
-			msg="Info: ${msgSrv} is idle. Stopping it"
+			msg="Info: $(ServerName) is idle. Stopping it"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			msg="Info: ${msgSrv} has stopped himself"
+			msg="Info: $(ServerName) has stopped himself"
 		fi
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
@@ -445,10 +448,10 @@ StartServer() {
 		if pid=$(ps -o pid,args --no-headers -C "mumudvb" | \
 		grep -sF "${tmpconf}" | \
 		awk '{print $1}'); then
-			msg="Err: ${msgSrv} is stuck"
+			msg="Err: $(ServerName) is stuck"
 			kill -s TERM ${pid} 2> /dev/null || :
 		else
-			msg="Err: ${msgSrv} doesn't run"
+			msg="Err: $(ServerName) doesn't run"
 		fi
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
@@ -458,7 +461,7 @@ StartServer() {
 	[ -z "${pid}" ] || \
 		! kill -s 0 ${pid} 2> /dev/null || {
 			[ -z "${Debug}" ] || \
-				_applog "Err: ${msgSrv} forced stopping"
+				_applog "Err: $(ServerName) forced stopping"
 			kill -s KILL ${pid} 2> /dev/null || :
 			sleep 2
 		}
@@ -601,33 +604,26 @@ Main() {
 			elif [ "${line%% *}" = "ListStatus" ]; then
 				ListStatus &
 				clientIP="${line##* }"
-				if [ -n "${Servers}" ]; then
-					while IFS=":" read portHttp card tuner; do
-						eval dvbtype=\"\${config$((portHttp-PortHttp))_dvbtype:-}\"
-						_msg "Status:" \
-							"mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}" \
-							"is active"
-						_applog "${msg}"
-						[ -z "${ExitPoints}" ] || \
-							((OnStatus "${msg}" "${clientIP}") &)
-						if connections="$(Traffic ${portHttp})"; then
-							_msg "Status:" \
-							"Server ${portHttp}, clients: $(Hostnames ${connections})"
-						else
-							_msg "Status:" \
-							"Server ${portHttp}, no clients connected"
-						fi
-						_applog "${msg}"
-						[ -z "${ExitPoints}" ] || \
-							((OnStatus "${msg}" "${clientIP}") &)
-					done < <(printf '%s' "${Servers}" | \
-						tr -s ' ' '\n')
-				else
+				if [ -z "${Servers}" ]; then
 					msg="Status: no servers active"
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
 						((OnStatus "${msg}" "${clientIP}") &)
+					continue
 				fi
+				while IFS=":" read portHttp card tuner; do
+					eval dvbtype=\"\${config$((portHttp-PortHttp))_dvbtype:-}\"
+					msg="Status: $(ServerName) is active"
+					if connections="$(Traffic ${portHttp})"; then
+						msg="${msg},${LF}clients: $(Hostnames ${connections})"
+					else
+						msg="${msg},${LF}no clients connected"
+					fi
+					_applog "${msg}"
+					[ -z "${ExitPoints}" ] || \
+						((OnStatus "${msg}" "${clientIP}") &)
+				done < <(printf '%s' "${Servers}" | \
+					tr -s ' ' '\n')
 			else
 				[ -z "${Debug}" ] || \
 					_applog "Warn: received invalid data from pipe" \
@@ -648,7 +644,7 @@ readonly NAME \
 	PIPE="pipe" \
 	LOG="log.txt" \
 	IRELOAD="HUP" ISTAT="USR2" \
-	OK=0 ERR=1 TAB=$'\t' NONE=0 \
+	OK=0 ERR=1 LF=$'\n' TAB=$'\t' NONE=0 \
 	NEWREQUEST="${NAME}New:" \
 	SERVEREND="ServerEnd:" \
 	RELOAD="reloadConfig"
