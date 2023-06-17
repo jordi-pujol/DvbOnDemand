@@ -332,7 +332,7 @@ StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf filename_pid log_file c d pid playlist \
 		clients client connections \
-		msg
+		msg msg1
 
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
@@ -411,16 +411,23 @@ StartServer() {
 				c=${IdleTimeout}
 				if [ "${clients}" != "${connections}" ]; then
 					msg="Info: $(ServerName)"
+					msg1="${msg}"
+					_applog "${msg}"
 					if client="$(ClientsDiff "${clients}" "${connections}")"; then
-						msg="${msg},${LF}Close:\"$(Hostnames ${client})\""
+						msg="Close:\"$(Hostnames ${client})\""
+						msg1="${msg1},${LF}${msg}"
+						_applog "${msg}"
 					fi
 					if client="$(ClientsDiff "${connections}" "${clients}")"; then
-						msg="${msg},${LF}Open:\"$(Hostnames ${client})\""
+						msg="Open:\"$(Hostnames ${client})\""
+						msg1="${msg1},${LF}${msg}"
+						_applog "${msg}"
 					fi
-					msg="${msg},${LF}Clients:\"$(Hostnames ${connections})\""
+					msg="Clients:\"$(Hostnames ${connections})\""
+					msg1="${msg1},${LF}${msg}"
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
-						((OnConnection "${msg}" \
+						((OnConnection "${msg1}" \
 							$(printf '%s\n' ${connections} ${clients} | \
 							cut -f 1 -d ':' | sort --unique)) &)
 					clients="${connections}"
@@ -528,7 +535,7 @@ _exit() {
 Main() {
 	# internal variables, daemon scope
 	local Adapters Configs Servers="" AdapterTypes ExitPoints="" \
-		reloadConfig line portHttp config card tuner dvbtype clientIP msg
+		reloadConfig line portHttp config card tuner dvbtype clientIP msg msg1
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -544,9 +551,11 @@ Main() {
 	trap '[ -n "${reloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
 	trap 'echo "ListStatus" >> "${PIPE}"' "${ISTAT}"
 
-	( journalctl --since="@$(_UTCseconds)" \
+	(while :; do
+		journalctl --since="@$(_UTCseconds)" \
 		--follow "--grep=${NEWREQUEST}" --output=cat | \
-		cat - > "${PIPE}" ) &
+		cat - > "${PIPE}" || :
+	done) &
 
 	while :; do
 		if read -r line < "${PIPE}"; then
@@ -614,14 +623,18 @@ Main() {
 				while IFS=":" read portHttp card tuner; do
 					eval dvbtype=\"\${config$((portHttp-PortHttp))_dvbtype:-}\"
 					msg="Status: $(ServerName) is active"
+					msg1="${msg}"
+					_applog "${msg}"
 					if connections="$(Traffic ${portHttp})"; then
-						msg="${msg},${LF}clients: $(Hostnames ${connections})"
+						msg="clients: $(Hostnames ${connections})"
+						msg1="${msg1},${LF}${msg}"
 					else
-						msg="${msg},${LF}no clients connected"
+						msg="no clients connected"
+						msg1="${msg1},${LF}${msg}"
 					fi
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
-						((OnStatus "${msg}" "${clientIP}") &)
+						((OnStatus "${msg1}" "${clientIP}") &)
 				done < <(printf '%s' "${Servers}" | \
 					tr -s ' ' '\n')
 			else
