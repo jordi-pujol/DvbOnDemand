@@ -405,17 +405,15 @@ StartServer() {
 							_applog "${msg}"
 							[ -z "${ExitPoints}" ] || \
 								((OnStartFail "${msg}" "${clientIP}") &)
-							if [ -n "${stuck}" ]; then
-								stuck=""
-								echo "stuck" > "${playlist}"
-							else
+							[ -n "${stuck}" ] && \
+								echo "stuck" > "${playlist}" || \
 								stuck="y"
-							fi
 							break
 						fi
 						continue
 					fi
 				fi
+				stuck=""
 				if connections="$(Traffic ${portHttp})"; then
 					c=${IdleTimeout}
 					if [ "${clients}" != "${connections}" ]; then
@@ -452,9 +450,14 @@ StartServer() {
 				fi
 			done
 			if kill -s 0 ${pid} 2> /dev/null; then
-				_msg "Info: $(ServerName) is" \
-					"$(test -z "${stuck}" && echo "idle." || echo "stuck.")" \
-					"Stopping it"
+				msg="Info: $(ServerName) is"
+				if [ -n "${stuck}" ]; then
+					[ -s "${playlist}" ] && \
+						_msg "${msg}" "stuck. Stopping it" || \
+						_msg "${msg}" "stuck. Restarting it"
+				else
+					_msg "${msg}" "idle. Stopping it"
+				fi
 				kill -s TERM ${pid} 2> /dev/null || :
 			else
 				msg="Info: $(ServerName) has stopped himself"
