@@ -358,7 +358,7 @@ StartServer() {
 	while [ ! -s "${playlist}" ] ; do
 		: > "${filename_pid}"
 		chown _mumudvb:video "${filename_pid}" "${log_file}"
-		/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
+		sudo --non-interactive --user _mumudvb -- /usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
 		msg="Info: starting $(ServerName)"
 		_applog "${msg}"
 		[ -z "${Debug}" ] || \
