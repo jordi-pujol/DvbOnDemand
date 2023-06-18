@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.15 $
+#  $Revision: 1.16 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -108,19 +108,20 @@ RuleInsert() {
 
 RuleClean() {
 	local portHttp="${1:-}" \
-		rule n d="y"
+		rule n port d="y"
+	port="${portHttp}"
 	until [ -z "${d}" ]; do
 		d=""
 		n=1
 		while rule="$(iptables -4 --wait --numeric --list INPUT ${n})" && \
 		[ -n "${rule}" ]; do
-			if grep -qs \
-			-e "LOG level info prefix \"${NEWREQUEST}${portHttp:-".*"}\"" \
+			if grep -qse "LOG.*prefix \"${NEWREQUEST}${portHttp:-".*"}\"" \
 			<<< "${rule}"; then
 				iptables -4 --wait --delete INPUT ${n}
-				_applog "Info: removing watch on port ${portHttp:-"$( \
-					sed -snre "/.*\"${NEWREQUEST}([[:digit:]]+)\".*/s//\1/p" \
-					<<< "${rule}")"}"
+				[ -n "${portHttp}" ] || \
+					port="$(sed -nre "/.*\"${NEWREQUEST}([[:digit:]]+)\".*/s//\1/p" \
+						<<< "${rule}")"
+				_applog "Info: removing watch on port ${port}"
 				d="y"
 			else
 				let "n++,1"
@@ -467,8 +468,9 @@ StartServer() {
 				((OnStop "${msg}" "${clientIP}") &)
 		else
 			if pid=$(ps -o pid,args --no-headers -C "mumudvb" | \
-			grep -sF "${tmpconf}" | \
-			awk '{print $1}'); then
+			awk -v tmpconf="${tmpconf}" \
+			'$0 ~ tmpconf {print $1; rc=-1; exit}
+			END{exit rc+1}'); then
 				msg="Err: $(ServerName) is stuck"
 				kill -s TERM ${pid} 2> /dev/null || :
 			else

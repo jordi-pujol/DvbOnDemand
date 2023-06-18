@@ -1,3 +1,11 @@
+dvbondemand (1.16) unstable; urgency=medium
+
+  * bug correction:
+    bin/dvbondemand, RuleClean():
+    Find rule numbers for iptables delete rule
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 18 Jun 2023 13:10:45 +0200
+
 dvbondemand (1.15) unstable; urgency=medium
 
   * a stuck mumudvb server will be restarted once
