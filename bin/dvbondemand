@@ -336,7 +336,7 @@ StartServer() {
 
 	RuleClean ${portHttp}
 	eval conffile=\"\${config${config}_conffile:-}\"
-	tmpconf="${portHttp}-$(basename "${conffile}")"
+	tmpconf="${portHttp}-${card}-${tuner}-$(basename "${conffile}")"
 	playlist="$(basename --suffix ".conf" "${conffile}").m3u"
 	filename_pid="${portHttp}.pid"
 	log_file="$(basename --suffix ".conf" "${tmpconf}").log"
