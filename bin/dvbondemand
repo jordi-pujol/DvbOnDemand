@@ -405,9 +405,12 @@ StartServer() {
 							_applog "${msg}"
 							[ -z "${ExitPoints}" ] || \
 								((OnStartFail "${msg}" "${clientIP}") &)
-							[ -n "${stuck}" ] && \
-								echo "stuck" > "${playlist}" || \
+							if [ -n "${stuck}" ]; then
+								stuck=""
+								echo "stuck" > "${playlist}"
+							else
 								stuck="y"
+							fi
 							break
 						fi
 						continue
