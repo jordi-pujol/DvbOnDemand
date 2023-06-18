@@ -410,10 +410,9 @@ StartServer() {
 								stuck="y"
 							break
 						fi
+						continue
 					fi
 				fi
-				[ -s "${playlist}" ] || \
-					continue
 				if connections="$(Traffic ${portHttp})"; then
 					c=${IdleTimeout}
 					if [ "${clients}" != "${connections}" ]; then
