@@ -4,7 +4,7 @@ dvbondemand (1.16) unstable; urgency=medium
     bin/dvbondemand, RuleClean():
     Find rule numbers for iptables delete rule
   * don't depend on lsof,
-    instead will find used files inspecting /proc/pid/fd
+    instead will find if files are used by inspecting /proc/pid/fd
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sun, 18 Jun 2023 13:10:45 +0200
 
