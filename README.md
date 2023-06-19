@@ -2,36 +2,39 @@
 
 Gets audio/video services from several dvb cards.
 
-Starts MuMuDVB servers on client's request.
+Starts **MuMuDVB** servers on client's request.
 
 Stops these servers when idle.
 
-dvbondemand detects when a service is required and therefore
-starts mumudvb sessions using an available dvb adapter.
+**DvbOnDemand** detects when a service is required and therefore
+starts **MuMuDVB** sessions using an available DVB adapter.
 
 In few seconds clients will get the corresponding http video/audio stream.
 
-Also, ends the mumudvb server session after client disconnection.
+Also, ends the **MuMuDVB** server session after clients disconnection.
+
 ## Scenario
+
 A network server is directly connected to some DVB cards.
 There are cards of type: Terrestrial, Satellite, Cable and/or ATSC.
 
-mumudvb is installed and several multiplexers have been configured.
+**MuMuDVB** is installed and several multiplexers have been configured.
 Each multiplexer must use one DVB card of the corresponding DVB type.
 
-dvbondemand reads the configurations and assigns one IP port to each multiplexer.
+**DvbOnDemand** reads the configurations and assigns one IP port to each one.
 
-When the server's network detects input on a IP port, 
-selects an availble DVB card of the correspondign type,
+When **DvbOnDemand** detects a network request on a IP port, 
+selects an available DVB card of the corresponding type,
 creates a temporary configuration,
-and starts mumudvb.
+and starts **MuMuDVB**
 
-After a few seconds mumudvb is running and makes available
-these multiplexer services.
+After a few seconds **MuMuDVB** is running and makes available
+these services.
 
 Several clients may connect to any of the multiplexer services.
 
-The server is idle when all clients are disconnected,
-dvbondemand will terminate the server after the idle timeout.
+When all clients are disconnected, **MuMuDVB** server is idle,
+therefore **DvbOnDemand** will terminate the **MuMuDVB** server after a timeout.
+
 ## Wiki
-For further information please look the dvbondemand wiki.
+For further information please look the **DvbOnDemand** wiki.
