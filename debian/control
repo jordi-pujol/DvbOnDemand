@@ -9,7 +9,7 @@ Package: dvbondemand
 Architecture: all
 Depends: ${misc:Depends},
  systemd, bash,
- wget, lsof, iptables,
+ wget, iptables,
  mumudvb (>= 1:2.1.0-dmo2),
 Recommends:
 Suggests:

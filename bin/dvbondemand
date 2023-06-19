@@ -35,6 +35,18 @@ _trim() {
 	sed -re "/^[[:blank:]]+|[[:blank:]]+$/s///g"
 }
 
+_lsof() {
+	local f="${1}" \
+		inum pids
+	inum="$(ls -i "$(readlink -f "${f}")" 2> /dev/null)" && \
+	pids="$(find /proc/*/fd -follow -inum ${inum%% *} 2> /dev/null | \
+		sed -nr -e '\|^/proc/1/|d' \
+		-e '\|^/proc/([[:digit:]]+)/.*|{s||\1|;p}' | \
+			sort --unique)"
+	test -n "${pids}" && \
+		echo ${pids}
+}
+
 _ps_children() {
 	local ppid=${1:-${$}} \
 		excl="${2:-"0"}" \
@@ -495,7 +507,7 @@ StartServer() {
 
 SelectAdapter() {
 	# global config portHttp card tuner dvbtype clientIP
-	local freq freqmax freqmin pid adapter msg
+	local freq freqmax freqmin adapter msg
 	eval freq=\"\${config${config}_freq:-}\"
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
@@ -505,8 +517,7 @@ SelectAdapter() {
 		'BEGIN{RS=" "; FS=":"}
 		$2 == card && $3 == tuner {rc=-1; exit}
 		END{exit rc+1}' || \
-		pid="$(lsof -wt \
-		"$(readlink -f "/dev/dvb/adapter${card}/demux${tuner}")")"; then
+		_lsof "/dev/dvb/adapter${card}/demux${tuner}" > /dev/null; then
 			[ -z "${Debug}" ] || \
 				_applog "Info: ${portHttp} can't use" \
 					"adapter${card}/frontend${tuner}"
