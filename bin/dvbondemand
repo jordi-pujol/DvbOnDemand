@@ -37,12 +37,12 @@ _trim() {
 
 _lsof() {
 	local f="${1}" \
-		inum pids
+		inum pids=""
 	inum="$(ls -i "$(readlink -f "${f}")" 2> /dev/null)" && \
 	pids="$(find /proc/*/fd -follow -inum ${inum%% *} 2> /dev/null | \
 		sed -nr -e '\|^/proc/1/|d' \
 		-e '\|^/proc/([[:digit:]]+)/.*|{s||\1|;p}' | \
-			sort --unique)"
+			sort -n -u)"
 	test -n "${pids}" && \
 		echo ${pids}
 }
