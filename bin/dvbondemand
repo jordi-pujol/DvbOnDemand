@@ -344,8 +344,8 @@ ServerName() {
 
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
-	local conffile tmpconf filename_pid log_file c d pid playlist \
-		clients client connections stuck \
+	local conffile tmpconf filename_pid log_file c d playlist \
+		unit clients client connections stuck \
 		msg msg1
 
 	RuleClean ${portHttp}
@@ -358,43 +358,39 @@ StartServer() {
 		-e "/^card=.*/s//card=${card}/" \
 		-e "/^tuner=.*/s//tuner=${tuner}/" \
 		-e "/^filename_pid=.*/s||filename_pid=${filename_pid}|" \
-		-e "/^log_file=.*/s||log_file=${log_file}|" \
 		< "${conffile}" > "${tmpconf}"
 	grep -qse "^filename_pid=" < "${tmpconf}" || \
 		sed -i -e "1ifilename_pid=${filename_pid}" "${tmpconf}"
-	grep -qse "^log_file=" < "${tmpconf}" || \
-		sed -i -e "1ilog_file=${log_file}" "${tmpconf}"
 
 	: > "${log_file}"
 	: > "${playlist}"
+	unit="${NAME}-${portHttp}"
 	stuck=""
 	while [ ! -s "${playlist}" ] ; do
 		: > "${filename_pid}"
 		chown _mumudvb:video "${filename_pid}" "${log_file}"
-		sudo --non-interactive --user _mumudvb -- \
-			/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
+		systemd-run \
+			--working-directory="${Workdir}" \
+			--unit="${unit}" \
+			--uid=_mumudvb \
+			--gid=video \
+			--property="StandardOutput=append:${Workdir}${log_file}" \
+			--property="StandardError=append:${Workdir}${log_file}" \
+				/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"
 		msg="Info: starting $(ServerName)"
 		_applog "${msg}"
 		[ -z "${Debug}" ] || \
 			[ -z "${ExitPoints}" ] || \
 				((OnStart "${msg}" "${clientIP}") &)
+		sleep 2
 		c=${IdleTimeout}
-		pid=""
-		while ps -o args --no-headers -C "mumudvb" | \
-		grep -qsF "${tmpconf}" && \
-		let "c-=2"; do
-			sleep 2
-			pid="$(cat "${filename_pid}" 2> /dev/null)" && \
-			[ -z "${pid}" ] || \
-				break
-		done
-		if [ -n "${pid}" ]; then
+		if systemctl --quiet is-active "${unit}"; then
 			[ -z "${Debug}" ] || \
 				_applog "Info: $(ServerName) is running"
 			clients=""
 			c=${IdleTimeout}
 			d=7
-			while kill -s 0 ${pid} 2> /dev/null && \
+			while systemctl --quiet is-active "${unit}" && \
 			let "c-=2"; do
 				sleep 2
 				if [ ! -s "${playlist}" ]; then
@@ -463,7 +459,7 @@ StartServer() {
 					clients=""
 				fi
 			done
-			if kill -s 0 ${pid} 2> /dev/null; then
+			if systemctl --quiet is-active "${unit}"; then
 				msg="Info: $(ServerName) is"
 				if [ -n "${stuck}" ]; then
 					[ -s "${playlist}" ] && \
@@ -472,7 +468,7 @@ StartServer() {
 				else
 					_msg "${msg}" "idle. Stopping it"
 				fi
-				kill -s TERM ${pid} 2> /dev/null || :
+				systemctl --quiet stop "${unit}"
 			else
 				msg="Info: $(ServerName) has stopped himself"
 			fi
@@ -480,27 +476,13 @@ StartServer() {
 			[ -z "${ExitPoints}" ] || \
 				((OnStop "${msg}" "${clientIP}") &)
 		else
-			if pid=$(ps -o pid,args --no-headers -C "mumudvb" | \
-			awk -v tmpconf="${tmpconf}" \
-			'$0 ~ tmpconf {print $1; rc=-1; exit}
-			END{exit rc+1}'); then
-				msg="Err: $(ServerName) is stuck"
-				kill -s TERM ${pid} 2> /dev/null || :
-			else
-				msg="Err: $(ServerName) doesn't run"
-			fi
+			msg="Err: $(ServerName) doesn't run"
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
 				((OnStartFail "${msg}" "${clientIP}") &)
+			echo "fail" > "${playlist}"
 		fi
 		sleep 2
-		[ -z "${pid}" ] || \
-			! kill -s 0 ${pid} 2> /dev/null || {
-				[ -z "${Debug}" ] || \
-					_applog "Err: $(ServerName) forced stopping"
-				kill -s KILL ${pid} 2> /dev/null || :
-				sleep 2
-			}
 	done
 	rm -f "${filename_pid}"
 	RuleInsert ${portHttp}
