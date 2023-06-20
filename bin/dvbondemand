@@ -347,7 +347,7 @@ ServerName() {
 
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
-	local conffile tmpconf filename_pid log_file c d playlist \
+	local conffile tmpconf log_file c d playlist \
 		unit clients client connections stuck \
 		msg msg1
 
@@ -355,23 +355,18 @@ StartServer() {
 	eval conffile=\"\${config${config}_conffile:-}\"
 	tmpconf="${portHttp}-${card}-${tuner}-$(basename "${conffile}")"
 	playlist="$(basename --suffix ".conf" "${conffile}").m3u"
-	filename_pid="${portHttp}.pid"
 	log_file="$(basename --suffix ".conf" "${tmpconf}").log"
 	sed -re "/^port_http=.*/s//port_http=${portHttp}/" \
 		-e "/^card=.*/s//card=${card}/" \
 		-e "/^tuner=.*/s//tuner=${tuner}/" \
-		-e "/^filename_pid=.*/s||filename_pid=${filename_pid}|" \
 		< "${conffile}" > "${tmpconf}"
-	grep -qse "^filename_pid=" < "${tmpconf}" || \
-		sed -i -e "1ifilename_pid=${filename_pid}" "${tmpconf}"
 
 	: > "${log_file}"
 	: > "${playlist}"
 	unit="${NAME}-${portHttp}"
 	stuck=""
 	while [ ! -s "${playlist}" ] ; do
-		: > "${filename_pid}"
-		chown _mumudvb:video "${filename_pid}" "${log_file}"
+		chown _mumudvb:video "${log_file}"
 		systemd-run --quiet \
 			--working-directory="${Workdir}" \
 			--unit="${unit}" \
@@ -487,7 +482,6 @@ StartServer() {
 		fi
 		sleep 2
 	done
-	rm -f "${filename_pid}"
 	RuleInsert ${portHttp}
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
