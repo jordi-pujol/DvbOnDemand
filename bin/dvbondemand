@@ -534,8 +534,15 @@ _exit() {
 	set +o errexit +o nounset -o pipefail +o noglob
 	_applog "Daemon exit"
 	printf '%s\n\n' "Daemon exit" >&2
+	if [ -n "${Servers}" ]; then
+		for portHttp in $(printf '%s' "${Servers}" | \
+		awk 'BEGIN{RS=" "; FS=":"};{print $1}'); do
+			systemctl --quiet stop "${NAME}-${portHttp}" || :
+		done
+		sleep 1
+	fi
 	RuleClean
-	pidsChildren="$(cat *.pid 2> /dev/null)"; _ps_children
+	pidsChildren=""; _ps_children
 	[ -z "${pidsChildren}" ] || \
 		kill -s TERM ${pidsChildren} 2> /dev/null || :
 	wait || :
