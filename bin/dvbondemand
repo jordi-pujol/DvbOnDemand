@@ -30,6 +30,9 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #************************************************************************
 
+set -o errexit -o nounset -o pipefail +o noglob +o noclobber
+shopt -s extglob
+
 _trim() {
 	printf '%s\n' "${@}" | \
 	sed -re "/^[[:blank:]]+|[[:blank:]]+$/s///g"
@@ -39,7 +42,7 @@ _lsof() {
 	local f="${1}" \
 		inum
 	inum="$(ls -i "$(readlink -f "${f}")" 2> /dev/null)" && \
-	{ find /proc/{1..9}*/fd -follow -inum ${inum%% *} 2> /dev/null
+	{ find /proc/+([0-9])/fd -follow -inum ${inum%% *} 2> /dev/null
 	echo ""
 	} | \
 		sed -nr -e '\|^/proc/1/|d' \
@@ -659,8 +662,6 @@ Main() {
 		fi
 	done
 }
-
-set -o errexit -o nounset -o pipefail +o noglob +o noclobber
 
 # constants
 NAME="$(basename "${0}")"
