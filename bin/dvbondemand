@@ -372,7 +372,7 @@ StartServer() {
 	while [ ! -s "${playlist}" ] ; do
 		: > "${filename_pid}"
 		chown _mumudvb:video "${filename_pid}" "${log_file}"
-		systemd-run \
+		systemd-run --quiet \
 			--working-directory="${Workdir}" \
 			--unit="${unit}" \
 			--uid=_mumudvb \
