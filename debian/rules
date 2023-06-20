@@ -12,7 +12,7 @@ override_dh_auto_test: $(BIN:%=bin-%) $(INIT:%=init-%)
 
 bin-%:
 	$(info checking $* ...)
-	@bash -n bin/$*
+	@bash -O extglob -n bin/$*
 	-@checkbashisms -f bin/$*
 
 init-%:

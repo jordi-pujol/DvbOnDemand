@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.16 $
+#  $Revision: 1.17 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -37,14 +37,15 @@ _trim() {
 
 _lsof() {
 	local f="${1}" \
-		inum pids=""
+		inum
 	inum="$(ls -i "$(readlink -f "${f}")" 2> /dev/null)" && \
-	pids="$(find /proc/*/fd -follow -inum ${inum%% *} 2> /dev/null | \
+	{ find /proc/{1..9}*/fd -follow -inum ${inum%% *} 2> /dev/null
+	echo ""
+	} | \
 		sed -nr -e '\|^/proc/1/|d' \
-		-e '\|^/proc/([[:digit:]]+)/.*|{s||\1|;p}' | \
-			sort -n -u)"
-	test -n "${pids}" && \
-		echo ${pids}
+		-e '\|^/proc/([[:digit:]]+)/.*|{s||\1|;h;p}' \
+		-e '${x;/./!{q1}}' | \
+			sort -n -u
 }
 
 _ps_children() {
@@ -370,7 +371,8 @@ StartServer() {
 	while [ ! -s "${playlist}" ] ; do
 		: > "${filename_pid}"
 		chown _mumudvb:video "${filename_pid}" "${log_file}"
-		sudo --non-interactive --user _mumudvb -- /usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
+		sudo --non-interactive --user _mumudvb -- \
+			/usr/bin/mumudvb ${Debug:+"-v"} -c "${tmpconf}"
 		msg="Info: starting $(ServerName)"
 		_applog "${msg}"
 		[ -z "${Debug}" ] || \
@@ -512,15 +514,16 @@ SelectAdapter() {
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		if printf '%s' "${Servers}" | \
+		if _lsof "/dev/dvb/adapter${card}/demux${tuner}" > /dev/null || \
+		printf '%s' "${Servers}" | \
 		awk -v card="${card}" -v tuner="${tuner}" \
 		'BEGIN{RS=" "; FS=":"}
 		$2 == card && $3 == tuner {rc=-1; exit}
-		END{exit rc+1}' || \
-		_lsof "/dev/dvb/adapter${card}/demux${tuner}" > /dev/null; then
+		END{exit rc+1}'; then
 			[ -z "${Debug}" ] || \
-				_applog "Info: ${portHttp} can't use" \
-					"adapter${card}/frontend${tuner}"
+				_applog "Info: ${portHttp} can't get" \
+					"adapter${card}/frontend${tuner}" \
+					"already in use"
 			continue
 		fi
 		eval freqmin=\"\${adapter${adapter}_freqmin:-}\"
