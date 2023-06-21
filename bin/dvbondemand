@@ -546,7 +546,7 @@ Main() {
 	trap '_exit' EXIT
 	trap 'exit' INT
 
-	LoadConfig || \
+	LoadConfig "${@}" || \
 		exit 1
 
 	[ ! -s "/usr/lib/${NAME}/exit-points.sh" ] || {
@@ -601,7 +601,7 @@ Main() {
 					'BEGIN{RS=" "; FS=":"}
 					$1 != portHttp {printf $0 " "}')"
 				if [ -z "${Servers}" -a -n "${reloadConfig}" ]; then
-					LoadConfig || \
+					LoadConfig "${@}" || \
 						exit 1
 					_applog "Info: configuration reloaded"
 				else
@@ -613,7 +613,7 @@ Main() {
 						"Active servers: ${Servers}"
 					reloadConfig="y"
 				else
-					LoadConfig || \
+					LoadConfig "${@}" || \
 						exit 1
 				fi
 			elif [ "${line%% *}" = "ListStatus" ]; then
