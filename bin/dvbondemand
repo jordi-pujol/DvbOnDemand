@@ -549,8 +549,7 @@ _exit() {
 
 Main() {
 	# internal variables, daemon scope
-	local Adapters Configs Servers="" AdapterTypes ExitPoints="" \
-		reloadConfig line portHttp config card tuner dvbtype clientIP msg msg1
+	local reloadConfig line portHttp config card tuner dvbtype clientIP msg msg1
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -675,7 +674,8 @@ readonly NAME \
 	SERVEREND="ServerEnd:" \
 	RELOAD="reloadConfig"
 # config variables
-declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
+declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist \
+	Adapters Configs Servers="" AdapterTypes ExitPoints=""
 
 case "${1:-}" in
 start)
