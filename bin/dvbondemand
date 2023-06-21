@@ -344,7 +344,7 @@ ServerName() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf log_file c d playlist \
-		unit clients client connections stuck \
+		unit clients client connections stuck quit \
 		msg msg1
 
 	RuleClean ${portHttp}
@@ -361,7 +361,8 @@ StartServer() {
 	: > "${playlist}"
 	unit="${NAME}-${portHttp}"
 	stuck=""
-	while [ ! -s "${playlist}" ] ; do
+	quit=""
+	while [ -z "${quit}" ]; do
 		chown _mumudvb:video "${log_file}"
 		systemd-run --quiet \
 			--working-directory="${Workdir}" \
@@ -412,7 +413,7 @@ StartServer() {
 						[ -z "${ExitPoints}" ] || \
 							((OnStartFail "${msg}" "${clientIP}") &)
 						[ -n "${stuck}" ] && \
-							echo "stuck" > "${playlist}" || \
+							quit="y" || \
 							stuck="y"
 						break
 					fi
@@ -456,19 +457,17 @@ StartServer() {
 			if systemctl --quiet is-active "${unit}"; then
 				msg="Info: $(ServerName) is"
 				if [ -n "${stuck}" ]; then
-					[ -s "${playlist}" ] && \
+					[ -n "${quit}" ] && \
 						_msg "${msg}" "stuck. Stopping it" || \
 						_msg "${msg}" "stuck. Restarting it"
 				else
 					_msg "${msg}" "idle. Stopping it"
-					[ -s "${playlist}" ] || \
-						echo "stopping" > "${playlist}"
+					quit="y"
 				fi
 				systemctl --quiet stop "${unit}"
 			else
 				msg="Info: $(ServerName) has stopped himself"
-				[ -s "${playlist}" ] || \
-					echo "stopped himself" > "${playlist}"
+				quit="y"
 			fi
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
@@ -478,7 +477,7 @@ StartServer() {
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
 				((OnStartFail "${msg}" "${clientIP}") &)
-			echo "run failed" > "${playlist}"
+			quit="y"
 		fi
 		sleep 2
 	done
