@@ -359,7 +359,7 @@ StartServer() {
 
 	: > "${log_file}"
 	: > "${playlist}"
-	unit="${NAME}-${portHttp}"
+	unit="${NAME}-${portHttp}.service"
 	stuck=""
 	chown _mumudvb:video "${log_file}"
 	systemd-run --quiet \
@@ -387,22 +387,9 @@ StartServer() {
 		let "c-=2"; do
 			sleep 2
 			if [ ! -s "${playlist}" ]; then
-				if wget --quiet -O "${playlist}" \
-				"http://$(hostname):${portHttp}/playlist.m3u" && \
-				[ $(wc -l < "${playlist}") -gt 1 ]; then
-					msg="Info: $(ServerName) is available"
-					_applog "${msg}"
-					[ -z "${ExitPoints}" ] || \
-						((OnAvail "${msg}" "${clientIP}") &)
-					if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
-						[ -z "${Debug}" ] || \
-							_applog "Info: adding playlist \"${playlist}\"" \
-								"to \"playlist.m3u\""
-						[ -s "playlist.m3u" ] && \
-							tail -n +2 "${playlist}" >> "playlist.m3u" || \
-							cp -f "${playlist}" "playlist.m3u"
-					fi
-				else
+				if ! wget --quiet -O "${playlist}" \
+				"http://$(hostname):${portHttp}/playlist.m3u" || \
+				[ $(wc -l < "${playlist}") -le 1 ]; then
 					: > "${playlist}"
 					! let "d--" || \
 						continue
@@ -417,6 +404,18 @@ StartServer() {
 					d=7
 					sleep 2
 					continue
+				fi
+				msg="Info: $(ServerName) is available"
+				_applog "${msg}"
+				[ -z "${ExitPoints}" ] || \
+					((OnAvail "${msg}" "${clientIP}") &)
+				if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
+					[ -z "${Debug}" ] || \
+						_applog "Info: adding playlist \"${playlist}\"" \
+							"to \"playlist.m3u\""
+					[ -s "playlist.m3u" ] && \
+						tail -n +2 "${playlist}" >> "playlist.m3u" || \
+						cp -f "${playlist}" "playlist.m3u"
 				fi
 			fi
 			stuck=""
@@ -529,7 +528,7 @@ _exit() {
 	if [ -n "${Servers}" ]; then
 		for portHttp in $(printf '%s' "${Servers}" | \
 		awk 'BEGIN{RS=" "; FS=":"};{print $1}'); do
-			systemctl --quiet stop "${NAME}-${portHttp}" || :
+			systemctl --quiet stop "${NAME}-${portHttp}.service" || :
 		done
 		sleep 1
 	fi
