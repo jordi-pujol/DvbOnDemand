@@ -1,3 +1,9 @@
+dvbondemand (1.18) unstable; urgency=medium
+
+  * simplify algorithm when mumudvb becomes stuck on adapters
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 21 Jun 2023 14:32:05 +0200
+
 dvbondemand (1.17) unstable; urgency=medium
 
   * systemd-run mumudvb

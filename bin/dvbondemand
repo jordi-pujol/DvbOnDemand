@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.17 $
+#  $Revision: 1.18 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -344,7 +344,7 @@ ServerName() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf log_file c d playlist \
-		unit clients client connections stuck quit \
+		unit clients client connections stuck \
 		msg msg1
 
 	RuleClean ${portHttp}
@@ -361,126 +361,119 @@ StartServer() {
 	: > "${playlist}"
 	unit="${NAME}-${portHttp}"
 	stuck=""
-	quit=""
-	while [ -z "${quit}" ]; do
-		chown _mumudvb:video "${log_file}"
-		systemd-run --quiet \
-			--working-directory="${Workdir}" \
-			--unit="${unit}" \
-			--uid=_mumudvb \
-			--gid=video \
-			--property="StandardOutput=append:${Workdir}${log_file}" \
-			--property="StandardError=append:${Workdir}${log_file}" \
-			/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"
-		msg="Info: starting $(ServerName)"
-		_applog "${msg}"
+	chown _mumudvb:video "${log_file}"
+	systemd-run --quiet \
+		--working-directory="${Workdir}" \
+		--unit="${unit}" \
+		--uid=_mumudvb \
+		--gid=video \
+		--property="StandardOutput=append:${Workdir}${log_file}" \
+		--property="StandardError=append:${Workdir}${log_file}" \
+		/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"
+	msg="Info: starting $(ServerName)"
+	_applog "${msg}"
+	[ -z "${Debug}" ] || \
+		[ -z "${ExitPoints}" ] || \
+			((OnStart "${msg}" "${clientIP}") &)
+	sleep 2
+	c=${IdleTimeout}
+	if systemctl --quiet is-active "${unit}"; then
 		[ -z "${Debug}" ] || \
-			[ -z "${ExitPoints}" ] || \
-				((OnStart "${msg}" "${clientIP}") &)
-		sleep 2
+			_applog "Info: $(ServerName) is running"
+		clients=""
 		c=${IdleTimeout}
-		if systemctl --quiet is-active "${unit}"; then
-			[ -z "${Debug}" ] || \
-				_applog "Info: $(ServerName) is running"
-			clients=""
-			c=${IdleTimeout}
-			d=7
-			while systemctl --quiet is-active "${unit}" && \
-			let "c-=2"; do
-				sleep 2
-				if [ ! -s "${playlist}" ]; then
-					if wget --quiet -O "${playlist}" \
-					"http://$(hostname):${portHttp}/playlist.m3u" && \
-					[ $(wc -l < "${playlist}") -gt 1 ]; then
-						msg="Info: $(ServerName) is available"
-						_applog "${msg}"
-						[ -z "${ExitPoints}" ] || \
-							((OnAvail "${msg}" "${clientIP}") &)
-						if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
-							[ -z "${Debug}" ] || \
-								_applog "Info: adding playlist \"${playlist}\"" \
-									"to \"playlist.m3u\""
-							[ -s "playlist.m3u" ] && \
-								tail -n +2 "${playlist}" >> "playlist.m3u" || \
-								cp -f "${playlist}" "playlist.m3u"
-						fi
-					else
-						: > "${playlist}"
-						! let "d--" || \
-							continue
-						msg="Warn: $(ServerName) is stuck"
-						_applog "${msg}"
-						[ -z "${ExitPoints}" ] || \
-							((OnStartFail "${msg}" "${clientIP}") &)
-						[ -n "${stuck}" ] && \
-							quit="y" || \
-							stuck="y"
-						break
-					fi
-				fi
-				stuck=""
-				if connections="$(Traffic ${portHttp})"; then
-					c=${IdleTimeout}
-					[ "${clients}" != "${connections}" ] || \
-						continue
-					msg="Info: $(ServerName)"
-					msg1="${msg}"
+		d=7
+		while systemctl --quiet is-active "${unit}" && \
+		let "c-=2"; do
+			sleep 2
+			if [ ! -s "${playlist}" ]; then
+				if wget --quiet -O "${playlist}" \
+				"http://$(hostname):${portHttp}/playlist.m3u" && \
+				[ $(wc -l < "${playlist}") -gt 1 ]; then
+					msg="Info: $(ServerName) is available"
 					_applog "${msg}"
-					if client="$(ClientsDiff "${clients}" "${connections}")"; then
-						msg="Close:\"$(Hostnames ${client})\""
-						msg1="${msg1},${LF}${msg}"
-						_applog "${msg}"
+					[ -z "${ExitPoints}" ] || \
+						((OnAvail "${msg}" "${clientIP}") &)
+					if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
+						[ -z "${Debug}" ] || \
+							_applog "Info: adding playlist \"${playlist}\"" \
+								"to \"playlist.m3u\""
+						[ -s "playlist.m3u" ] && \
+							tail -n +2 "${playlist}" >> "playlist.m3u" || \
+							cp -f "${playlist}" "playlist.m3u"
 					fi
-					if client="$(ClientsDiff "${connections}" "${clients}")"; then
-						msg="Open:\"$(Hostnames ${client})\""
-						msg1="${msg1},${LF}${msg}"
-						_applog "${msg}"
-					fi
-					msg="Clients:\"$(Hostnames ${connections})\""
+				else
+					: > "${playlist}"
+					! let "d--" || \
+						continue
+					[ -z "${stuck}" ] || \
+						break
+					stuck="y"
+					msg="Warn: $(ServerName) is stuck. Restarting it"
+					_applog "${msg}"
+					[ -z "${ExitPoints}" ] || \
+						((OnStartFail "${msg}" "${clientIP}") &)
+					systemctl --quiet restart "${unit}"
+					d=7
+					sleep 2
+					continue
+				fi
+			fi
+			stuck=""
+			if connections="$(Traffic ${portHttp})"; then
+				c=${IdleTimeout}
+				[ "${clients}" != "${connections}" ] || \
+					continue
+				msg="Info: $(ServerName)"
+				msg1="${msg}"
+				_applog "${msg}"
+				if client="$(ClientsDiff "${clients}" "${connections}")"; then
+					msg="Close:\"$(Hostnames ${client})\""
 					msg1="${msg1},${LF}${msg}"
 					_applog "${msg}"
-					[ -z "${ExitPoints}" ] || \
-						((OnConnection "${msg1}" \
-							$(printf '%s\n' ${connections} ${clients} | \
-							cut -f 1 -d ':' | sort --unique)) &)
-					clients="${connections}"
-				elif [ -n "${clients}" ]; then
-					msg="Info: $(ServerName) All closed:\"$(Hostnames ${clients})\""
+				fi
+				if client="$(ClientsDiff "${connections}" "${clients}")"; then
+					msg="Open:\"$(Hostnames ${client})\""
+					msg1="${msg1},${LF}${msg}"
 					_applog "${msg}"
-					[ -z "${ExitPoints}" ] || \
-						((OnConnection "${msg}" \
-							$(printf '%s\n' ${clients} | \
-							cut -f 1 -d ':' | sort --unique)) &)
-					clients=""
 				fi
-			done
-			[ -n "${stuck}" ] || \
-				quit="y"
-			if systemctl --quiet is-active "${unit}"; then
-				msg="Info: $(ServerName) is"
-				if [ -n "${stuck}" ]; then
-					[ -n "${quit}" ] && \
-						_msg "${msg}" "stuck. Stopping it" || \
-						_msg "${msg}" "stuck. Restarting it"
-				else
-					_msg "${msg}" "idle. Stopping it"
-				fi
-				systemctl --quiet stop "${unit}"
-			else
-				msg="Info: $(ServerName) has stopped himself"
+				msg="Clients:\"$(Hostnames ${connections})\""
+				msg1="${msg1},${LF}${msg}"
+				_applog "${msg}"
+				[ -z "${ExitPoints}" ] || \
+					((OnConnection "${msg1}" \
+						$(printf '%s\n' ${connections} ${clients} | \
+						cut -f 1 -d ':' | sort --unique)) &)
+				clients="${connections}"
+			elif [ -n "${clients}" ]; then
+				msg="Info: $(ServerName) All closed:\"$(Hostnames ${clients})\""
+				_applog "${msg}"
+				[ -z "${ExitPoints}" ] || \
+					((OnConnection "${msg}" \
+						$(printf '%s\n' ${clients} | \
+						cut -f 1 -d ':' | sort --unique)) &)
+				clients=""
 			fi
-			_applog "${msg}"
-			[ -z "${ExitPoints}" ] || \
-				((OnStop "${msg}" "${clientIP}") &)
+		done
+		if systemctl --quiet is-active "${unit}"; then
+			_msg "Info: $(ServerName) is" \
+				"$(test -n "${stuck}" && echo "stuck" || echo "idle")." \
+				"Stopping it"
+			systemctl --quiet stop "${unit}"
 		else
-			msg="Err: $(ServerName) doesn't run"
-			_applog "${msg}"
-			[ -z "${ExitPoints}" ] || \
-				((OnStartFail "${msg}" "${clientIP}") &)
-			quit="y"
+			msg="Info: $(ServerName) has stopped himself"
 		fi
+		_applog "${msg}"
+		[ -z "${ExitPoints}" ] || \
+			((OnStop "${msg}" "${clientIP}") &)
 		sleep 2
-	done
+	else
+		msg="Err: $(ServerName) doesn't run"
+		_applog "${msg}"
+		[ -z "${ExitPoints}" ] || \
+			((OnStartFail "${msg}" "${clientIP}") &)
+		quit="y"
+	fi
 	RuleInsert ${portHttp}
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
@@ -674,8 +667,9 @@ readonly NAME \
 	SERVEREND="ServerEnd:" \
 	RELOAD="reloadConfig"
 # config variables
-declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist \
-	Adapters Configs Servers="" AdapterTypes ExitPoints=""
+declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
+# Main function variables
+declare Adapters Configs Servers="" AdapterTypes ExitPoints=""
 
 case "${1:-}" in
 start)
