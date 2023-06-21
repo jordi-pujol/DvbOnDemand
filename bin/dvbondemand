@@ -332,13 +332,9 @@ ClientsDiff() {
 	local clientsA="${1}" \
 		clientsB="${2}"
 	test -n "${clientsA}" && \
-		if test -n "${clientsB}"; then
-			printf '%s\n' ${clientsA} | \
-				grep -svxF "$(printf '%s\n' ${clientsB})" | \
-				tr -s '[[:space:]]' ' '
-		else
-			printf '%s\n' "${clientsA}"
-		fi
+		printf '%s\n' ${clientsA} | \
+			grep -svxF "$(printf '%s\n' ${clientsB:-0})" | \
+			tr -s '[[:space:]]' ' '
 }
 
 ServerName() {
@@ -374,7 +370,7 @@ StartServer() {
 			--gid=video \
 			--property="StandardOutput=append:${Workdir}${log_file}" \
 			--property="StandardError=append:${Workdir}${log_file}" \
-				/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"
+			/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"
 		msg="Info: starting $(ServerName)"
 		_applog "${msg}"
 		[ -z "${Debug}" ] || \
@@ -465,10 +461,14 @@ StartServer() {
 						_msg "${msg}" "stuck. Restarting it"
 				else
 					_msg "${msg}" "idle. Stopping it"
+					[ -s "${playlist}" ] || \
+						echo "stopping" > "${playlist}"
 				fi
 				systemctl --quiet stop "${unit}"
 			else
 				msg="Info: $(ServerName) has stopped himself"
+				[ -s "${playlist}" ] || \
+					echo "stopped himself" > "${playlist}"
 			fi
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
@@ -478,7 +478,7 @@ StartServer() {
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
 				((OnStartFail "${msg}" "${clientIP}") &)
-			echo "fail" > "${playlist}"
+			echo "run failed" > "${playlist}"
 		fi
 		sleep 2
 	done
