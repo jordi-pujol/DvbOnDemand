@@ -454,6 +454,8 @@ StartServer() {
 					clients=""
 				fi
 			done
+			[ -n "${stuck}" ] || \
+				quit="y"
 			if systemctl --quiet is-active "${unit}"; then
 				msg="Info: $(ServerName) is"
 				if [ -n "${stuck}" ]; then
@@ -462,12 +464,10 @@ StartServer() {
 						_msg "${msg}" "stuck. Restarting it"
 				else
 					_msg "${msg}" "idle. Stopping it"
-					quit="y"
 				fi
 				systemctl --quiet stop "${unit}"
 			else
 				msg="Info: $(ServerName) has stopped himself"
-				quit="y"
 			fi
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
