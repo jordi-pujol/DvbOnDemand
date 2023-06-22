@@ -564,93 +564,93 @@ Main() {
 	done) &
 
 	while :; do
-		if read -r line < "${PIPE}"; then
-			if portHttp="$(sed -nr \
-			-e "/.*${NEWREQUEST}.*DPT=([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
-			-e '${q1}' <<< "${line}")"; then
-				if printf '%s' "${Servers}" | \
+		read -r line < "${PIPE}" || {
+			_applog "Warn: can't read from pipe"
+			continue
+		}
+		if portHttp="$(sed -nr \
+		-e "/.*${NEWREQUEST}.*DPT=([[:digit:]]+)[^[:digit:]].*/{s//\1/;p;q}" \
+		-e '${q1}' <<< "${line}")"; then
+			if printf '%s' "${Servers}" | \
+			awk -v portHttp="${portHttp}" \
+			'BEGIN{RS=" "; FS=":"}
+			$1 == portHttp {rc=-1; exit}
+			END{exit rc+1}' || \
+			Traffic ${portHttp} > /dev/null; then
+				[ -z "${Debug}" ] || \
+					_applog "Warn: received new request" \
+						"for already active port ${portHttp}"
+				continue
+			fi
+			clientIP="$(sed -nr \
+				-e "/.*${NEWREQUEST}.*SRC=([[:digit:].]+)[^[:digit:].].*/{s//\1/;p;q}" \
+				<<< "${line}")"
+			let "config=portHttp-PortHttp,1"
+			eval dvbtype=\"\${config${config}_dvbtype:-}\"
+			msg="Info: $(Hostnames ${clientIP}) requests port ${portHttp}"
+			_applog "${msg}"
+			[ -z "${ExitPoints}" ] || \
+				((OnRequest "${msg}" "${clientIP}") &)
+			SelectAdapter || \
+				continue
+			Servers="${Servers}${portHttp}:${card}:${tuner} "
+			StartServer &
+			ListStatus &
+		elif portHttp="$(sed -nr \
+		-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
+		-e '${q1}' <<< "${line}")"; then
+			Servers="$(printf '%s' "${Servers}" | \
 				awk -v portHttp="${portHttp}" \
 				'BEGIN{RS=" "; FS=":"}
-				$1 == portHttp {rc=-1; exit}
-				END{exit rc+1}' || \
-				Traffic ${portHttp} > /dev/null; then
-					[ -z "${Debug}" ] || \
-						_applog "Warn: received new request" \
-							"for already active port ${portHttp}"
-					continue
-				fi
-				clientIP="$(sed -nr \
-					-e "/.*${NEWREQUEST}.*SRC=([[:digit:].]+)[^[:digit:].].*/{s//\1/;p;q}" \
-					<<< "${line}")"
-				let "config=portHttp-PortHttp,1"
-				eval dvbtype=\"\${config${config}_dvbtype:-}\"
-				msg="Info: $(Hostnames ${clientIP}) requests port ${portHttp}"
+				$1 != portHttp {printf $0 " "}')"
+			RuleInsert ${portHttp}
+			if [ -z "${Servers}" -a -n "${reloadConfig}" ]; then
+				LoadConfig "${@}" || \
+					exit 1
+				_applog "Info: configuration reloaded"
+			else
+				ListStatus &
+			fi
+		elif [ "${line}" = "${RELOAD}" ]; then
+			if [ -n "${Servers}" ]; then
+				_applog "Warn: deferring configuration reload." \
+					"Active servers: ${Servers}"
+				reloadConfig="y"
+			else
+				LoadConfig "${@}" || \
+					exit 1
+			fi
+		elif [ "${line%% *}" = "ListStatus" ]; then
+			ListStatus &
+			clientIP="${line##* }"
+			if [ -z "${Servers}" ]; then
+				msg="Status: no servers active"
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
-					((OnRequest "${msg}" "${clientIP}") &)
-				SelectAdapter || \
-					continue
-				Servers="${Servers}${portHttp}:${card}:${tuner} "
-				StartServer &
-				ListStatus &
-			elif portHttp="$(sed -nr \
-			-e "/^${SERVEREND}([[:digit:]]+)$/{s//\1/;p;q}" \
-			-e '${q1}' <<< "${line}")"; then
-				Servers="$(printf '%s' "${Servers}" | \
-					awk -v portHttp="${portHttp}" \
-					'BEGIN{RS=" "; FS=":"}
-					$1 != portHttp {printf $0 " "}')"
-				RuleInsert ${portHttp}
-				if [ -z "${Servers}" -a -n "${reloadConfig}" ]; then
-					LoadConfig "${@}" || \
-						exit 1
-					_applog "Info: configuration reloaded"
-				else
-					ListStatus &
-				fi
-			elif [ "${line}" = "${RELOAD}" ]; then
-				if [ -n "${Servers}" ]; then
-					_applog "Warn: deferring configuration reload." \
-						"Active servers: ${Servers}"
-					reloadConfig="y"
-				else
-					LoadConfig "${@}" || \
-						exit 1
-				fi
-			elif [ "${line%% *}" = "ListStatus" ]; then
-				ListStatus &
-				clientIP="${line##* }"
-				if [ -z "${Servers}" ]; then
-					msg="Status: no servers active"
-					_applog "${msg}"
-					[ -z "${ExitPoints}" ] || \
-						((OnStatus "${msg}" "${clientIP}") &)
-					continue
-				fi
-				while IFS=":" read portHttp card tuner; do
-					eval dvbtype=\"\${config$((portHttp-PortHttp))_dvbtype:-}\"
-					msg="Status: $(ServerName) is active"
-					msg1="${msg}"
-					_applog "${msg}"
-					if clients="$(Traffic ${portHttp})"; then
-						msg="clients: $(Hostnames ${clients})"
-						msg1="${msg1},${LF}${msg}"
-					else
-						msg="no clients connected"
-						msg1="${msg1},${LF}${msg}"
-					fi
-					_applog "${msg}"
-					[ -z "${ExitPoints}" ] || \
-						((OnStatus "${msg1}" "${clientIP}") &)
-				done < <(printf '%s' "${Servers}" | \
-					tr -s ' ' '\n')
-			else
-				[ -z "${Debug}" ] || \
-					_applog "Warn: received invalid data from pipe" \
-						"\"${line}\""
+					((OnStatus "${msg}" "${clientIP}") &)
+				continue
 			fi
+			while IFS=":" read portHttp card tuner; do
+				eval dvbtype=\"\${config$((portHttp-PortHttp))_dvbtype:-}\"
+				msg="Status: $(ServerName) is active"
+				msg1="${msg}"
+				_applog "${msg}"
+				if clients="$(Traffic ${portHttp})"; then
+					msg="clients: $(Hostnames ${clients})"
+					msg1="${msg1},${LF}${msg}"
+				else
+					msg="no clients connected"
+					msg1="${msg1},${LF}${msg}"
+				fi
+				_applog "${msg}"
+				[ -z "${ExitPoints}" ] || \
+					((OnStatus "${msg1}" "${clientIP}") &)
+			done < <(printf '%s' "${Servers}" | \
+				tr -s ' ' '\n')
 		else
-			_applog "Warn: can't read from pipe"
+			[ -z "${Debug}" ] || \
+				_applog "Warn: received invalid data from pipe" \
+					"\"${line}\""
 		fi
 	done
 }
