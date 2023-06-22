@@ -1,6 +1,8 @@
 dvbondemand (1.18) unstable; urgency=medium
 
   * simplify algorithm when mumudvb becomes stuck on adapters
+  * To stop all dvbondemand daemons via systemd ExecStop
+    send the corresponding signal and wait programs stop.
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 21 Jun 2023 14:32:05 +0200
 

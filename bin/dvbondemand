@@ -117,7 +117,7 @@ RuleInsert() {
 		-m tcp --dport ${portHttp} \
 		-m state --state NEW \
 		-m limit --limit 20/min \
-		-j LOG --log-level info --log-prefix "${NEWREQUEST}${portHttp}"
+		-j LOG --log-level info --log-prefix "${NEWREQUEST}"
 	let "config=portHttp-PortHttp,1"
 	eval conffile=\"\${config${config}_conffile:-}\"
 	_applog "Info: watching port ${portHttp} for \"${conffile}\""
@@ -132,11 +132,11 @@ RuleClean() {
 		n=1
 		while rule="$(iptables -4 --wait --numeric --list INPUT ${n})" && \
 		[ -n "${rule}" ]; do
-			if grep -qse "LOG.*prefix \"${NEWREQUEST}${portHttp:-".*"}\"" \
+			if grep -qse "LOG.*tcp dpt:${portHttp:-".*"} .*prefix \"${NEWREQUEST}\"" \
 			<<< "${rule}"; then
 				iptables -4 --wait --delete INPUT ${n}
 				[ -n "${portHttp}" ] || \
-					port="$(sed -nre "/.*\"${NEWREQUEST}([[:digit:]]+)\".*/s//\1/p" \
+					port="$(sed -nre "/.*tcp dpt:([[:digit:]]+) .*/s//\1/p" \
 						<<< "${rule}")"
 				_applog "Info: removing watch on port ${port}"
 				d="y"
@@ -172,7 +172,7 @@ ListStatus() {
 
 LoadConfig() {
 	local name data conffile line ind \
-		card tuner dvbtype item service_id \
+		card tuner dvbtype item service_id adapterTypes \
 		msg="Loading configuration"
 
 	mkdir -p -m 0755 "/run/mumudvb"
@@ -199,7 +199,7 @@ LoadConfig() {
 	[ -e "${PIPE}" ] || \
 		mkfifo "${PIPE}"
 
-	AdapterTypes=""
+	adapterTypes=""
 	Adapters=${NONE}
 	Configs=${NONE}
 	PreBackupRotate
@@ -288,16 +288,16 @@ LoadConfig() {
 				eval adapter${adapter}_freqmax='${data##* }'
 				let "Adapters++,1"
 				_applog "Info: Detected ${dvbtype} card ${card}:${tuner} \"${name}\""
-				printf '%s' "${AdapterTypes}" | \
+				printf '%s' "${adapterTypes}" | \
 				grep -qswF "${dvbtype}" || \
-					AdapterTypes="${AdapterTypes}${dvbtype} "
+					adapterTypes="${adapterTypes}${dvbtype} "
 			fi
 			ind=0
 			;;
 		esac
 	done < <(/usr/bin/mumudvb --list-cards 2>&1)
 
-	for dvbtype in ${AdapterTypes}; do
+	for dvbtype in ${adapterTypes}; do
 		while read -r conffile; do
 			let "Configs++,1"
 			eval config${Configs}_conffile='${conffile}'
@@ -369,6 +369,7 @@ StartServer() {
 		--gid=video \
 		--property="StandardOutput=append:${Workdir}${log_file}" \
 		--property="StandardError=append:${Workdir}${log_file}" \
+		--property="ExecStop=/usr/sbin/${NAME} stop \$MAINPID" \
 		/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"
 	msg="Info: starting ${servername}"
 	_applog "${msg}"
@@ -544,13 +545,13 @@ Main() {
 	trap '_exit' EXIT
 	trap 'exit' INT
 
-	LoadConfig "${@}" || \
-		exit 1
-
 	[ ! -s "/usr/lib/${NAME}/exit-points.sh" ] || {
 		. "/usr/lib/${NAME}/exit-points.sh"
 		ExitPoints="y"
 	}
+
+	LoadConfig "${@}" || \
+		exit 1
 
 	trap '[ -n "${reloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
 	trap 'echo "ListStatus" >> "${PIPE}"' "${ISTAT}"
@@ -581,7 +582,7 @@ Main() {
 				continue
 			fi
 			clientIP="$(sed -nr \
-				-e "/.*${NEWREQUEST}.*SRC=([[:digit:].]+)[^[:digit:].].*/{s//\1/;p;q}" \
+				-e "/.*SRC=([[:digit:].]+)[^[:digit:].].*/{s//\1/;p;q}" \
 				<<< "${line}")"
 			let "config=portHttp-PortHttp,1"
 			eval dvbtype=\"\${config${config}_dvbtype:-}\"
@@ -666,13 +667,29 @@ readonly NAME \
 	RELOAD="reloadConfig"
 # config variables
 declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
-# Main function variables
-declare Adapters Configs Servers="" AdapterTypes ExitPoints=""
+# Main Global variables
+declare Adapters Configs Servers="" ExitPoints=""
 
 case "${1:-}" in
 start)
 	shift
 	Main "${@}"
+	;;
+stop)
+	shift
+	exec 2> /dev/null
+	MAINPID=${1}
+	SIGNAL="${2:-"TERM"}"
+	kill -s "${SIGNAL}" ${MAINPID} || :
+	c=10
+	while sleep 1;
+	kill -0 ${MAINPID} && \
+	let "c--"; do
+		:
+	done
+	[ "${SIGNAL}" = "TERM" ] || \
+		! kill -0 ${MAINPID} || \
+			kill -s "TERM" ${MAINPID} || :
 	;;
 status)
 	if ! systemctl --quiet is-active dvbondemand.service; then

@@ -7,11 +7,8 @@ AssertDirectoryNotEmpty=/dev/dvb
 [Service]
 Type=simple
 ExecStart=/usr/sbin/dvbondemand start
-ExecStop=/bin/bash -c "/bin/kill -s SIGINT $MAINPID; \
-	while /bin/kill -0 $MAINPID; do \
-		sleep 1; \
-	done"
-ExecReload=/bin/kill -s SIGHUP $MAINPID
+ExecStop=/usr/sbin/dvbondemand stop $MAINPID INT
+ExecReload=/bin/kill -s HUP $MAINPID
 StandardOutput=journal
 
 [Install]
