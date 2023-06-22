@@ -195,7 +195,7 @@ LoadConfig() {
 		Workdir="${Workdir}/"
 	mkdir -p "${Workdir}"
 	cd "${Workdir}"
-	rm -f *.{conf,m3u} {0..9}* "${STAT}" 2> /dev/null
+	rm -f *.{conf,m3u,log} {0..9}* "${STAT}" 2> /dev/null
 	[ -e "${PIPE}" ] || \
 		mkfifo "${PIPE}"
 
@@ -521,8 +521,6 @@ SelectAdapter() {
 _exit() {
 	trap - EXIT INT
 	set +o errexit +o nounset -o pipefail +o noglob
-	_applog "Daemon exit"
-	printf '%s\n\n' "Daemon exit" >&2
 	if [ -n "${Servers}" ]; then
 		for portHttp in $(printf '%s' "${Servers}" | \
 		awk 'BEGIN{RS=" "; FS=":"};{print $1}'); do
@@ -535,6 +533,7 @@ _exit() {
 	[ -z "${pidsChildren}" ] || \
 		kill -s TERM ${pidsChildren} 2> /dev/null || :
 	wait || :
+	printf '%s\n\n' "Daemon exit" >&2
 }
 
 Main() {
