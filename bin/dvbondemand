@@ -113,8 +113,9 @@ RuleInsert() {
 		! Traffic ${portHttp} > /dev/null || \
 			_applog "Warn: will set watch on port ${portHttp}" \
 				"when server is already active"
-	iptables -4 --wait -I INPUT -p tcp -m tcp \
-		--dport ${portHttp} -m state --state NEW \
+	iptables -4 --wait -I INPUT -p tcp \
+		-m tcp --dport ${portHttp} \
+		-m state --state NEW \
 		-m limit --limit 20/min \
 		-j LOG --log-level info --log-prefix "${NEWREQUEST}${portHttp}"
 	let "config=portHttp-PortHttp,1"
@@ -332,8 +333,7 @@ ClientsDiff() {
 	local clientsA="${1}" \
 		clientsB="${2}"
 	test -n "${clientsA}" && \
-		grep -svxF "${clientsB:-0}" <<< "${clientsA}" | \
-			tr -s '[[:space:]]' ' '
+		grep -svxF "${clientsB:-0}" <<< "${clientsA}"
 }
 
 ServerName() {
@@ -396,11 +396,11 @@ StartServer() {
 					[ -z "${stuck}" ] || \
 						break
 					stuck="y"
+					systemctl --quiet restart "${unit}"
 					msg="Warn: ${servername} is stuck. Restarting it"
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
 						((OnStartFail "${msg}" "${clientIP}") &)
-					systemctl --quiet restart "${unit}"
 					d=7
 					sleep 2
 					continue
@@ -471,7 +471,6 @@ StartServer() {
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
 			((OnStartFail "${msg}" "${clientIP}") &)
-		quit="y"
 	fi
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
