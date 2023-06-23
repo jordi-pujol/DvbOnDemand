@@ -7,7 +7,9 @@ AssertDirectoryNotEmpty=/dev/dvb
 [Service]
 Type=simple
 ExecStart=/usr/sbin/dvbondemand start
-ExecStop=/usr/sbin/dvbondemand stop $MAINPID INT
+KillMode=mixed
+KillSignal=INT
+TimeoutStopSec=10s
 ExecReload=/bin/kill -s HUP $MAINPID
 StandardOutput=journal
 

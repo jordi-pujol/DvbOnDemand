@@ -369,7 +369,9 @@ StartServer() {
 		--gid=video \
 		--property="StandardOutput=append:${Workdir}${log_file}" \
 		--property="StandardError=append:${Workdir}${log_file}" \
-		--property="ExecStop=/usr/sbin/${NAME} stop \$MAINPID" \
+		--property="KillMode=mixed" \
+		--property="KillSignal=INT" \
+		--property="TimeoutStopSec=10s" \
 		/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"
 	msg="Info: starting ${servername}"
 	_applog "${msg}"
@@ -674,25 +676,6 @@ case "${1:-}" in
 start)
 	shift
 	Main "${@}"
-	;;
-stop)
-	shift
-	exec 2> /dev/null
-	MAINPID=${1}
-	SIGNAL="${2:-"TERM"}"
-	kill -s "${SIGNAL}" ${MAINPID} || :
-	c=10
-	while sleep 1;
-	kill -0 ${MAINPID} && \
-	let "c--"; do
-		:
-	done
-	! kill -0 ${MAINPID} || \
-		if [ "${SIGNAL}" = "TERM" ]; then
-			kill -s "KILL" ${MAINPID} || :
-		else
-			kill -s "TERM" ${MAINPID} || :
-		fi
 	;;
 status)
 	if ! systemctl --quiet is-active dvbondemand.service; then
