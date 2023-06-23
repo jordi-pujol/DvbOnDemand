@@ -1,6 +1,6 @@
 dvbondemand (1.19) unstable; urgency=medium
 
-  * l
+  * Set properties to stop systemd services.
 
  -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 22 Jun 2023 21:41:20 +0200
 
