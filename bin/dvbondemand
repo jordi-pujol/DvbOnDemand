@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.18 $
+#  $Revision: 1.19 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -534,7 +534,7 @@ _exit() {
 	[ -z "${pidsChildren}" ] || \
 		kill -s TERM ${pidsChildren} 2> /dev/null || :
 	wait || :
-	printf '%s\n\n' "Daemon exit" >&2
+	_applog "Daemon exit"
 }
 
 Main() {
@@ -687,9 +687,12 @@ stop)
 	let "c--"; do
 		:
 	done
-	[ "${SIGNAL}" = "TERM" ] || \
-		! kill -0 ${MAINPID} || \
+	! kill -0 ${MAINPID} || \
+		if [ "${SIGNAL}" = "TERM" ]; then
+			kill -s "KILL" ${MAINPID} || :
+		else
 			kill -s "TERM" ${MAINPID} || :
+		fi
 	;;
 status)
 	if ! systemctl --quiet is-active dvbondemand.service; then

@@ -1,3 +1,9 @@
+dvbondemand (1.19) unstable; urgency=medium
+
+  * l
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Thu, 22 Jun 2023 21:41:20 +0200
+
 dvbondemand (1.18) unstable; urgency=medium
 
   * simplify algorithm when mumudvb becomes stuck on adapters
