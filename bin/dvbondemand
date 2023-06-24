@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.19 $
+#  $Revision: 1.20 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -166,8 +166,15 @@ Hostnames() {
 ListStatus() {
 	exec > "${STAT}"
 	set | sed -nre "/\(\)[[:blank:]]*$/d" \
-		-e '/^(adapter|config)[[:digit:]]*_/p' \
 		-e '/^[[:upper:]][[:lower:]]/p'
+	for adapter in $(seq ${Adapters}); do
+		echo
+		set | sed -n -e "/^adapter${adapter}_/p"
+	done
+	for config in $(seq ${Configs}); do
+		echo
+		set | sed -n -e "/^config${config}_/p"
+	done
 }
 
 LoadConfig() {
@@ -553,7 +560,7 @@ Main() {
 	}
 
 	LoadConfig "${@}" || \
-		exit 1
+		exit ${ERR}
 
 	trap '[ -n "${reloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
 	trap 'echo "ListStatus" >> "${PIPE}"' "${ISTAT}"
@@ -607,7 +614,7 @@ Main() {
 			RuleInsert ${portHttp}
 			if [ -z "${Servers}" -a -n "${reloadConfig}" ]; then
 				LoadConfig "${@}" || \
-					exit 1
+					exit ${ERR}
 				_applog "Info: configuration reloaded"
 			else
 				ListStatus &
@@ -619,7 +626,7 @@ Main() {
 				reloadConfig="y"
 			else
 				LoadConfig "${@}" || \
-					exit 1
+					exit ${ERR}
 			fi
 		elif [ "${line%% *}" = "ListStatus" ]; then
 			ListStatus &
@@ -680,7 +687,7 @@ start)
 status)
 	if ! systemctl --quiet is-active dvbondemand.service; then
 		echo "Err: Service not active" >&2
-		exit 1
+		exit ${ERR}
 	fi
 	Workdir="/run/${NAME}/"
 	[ ! -s "/etc/default/${NAME}" ] || \
@@ -703,12 +710,12 @@ status)
 	done
 	if [ ${c} -le 0 ]; then
 		echo "Err: Error when updating status file" >&2
-		exit 1
+		exit ${ERR}
 	fi
 	cat "${STAT}"
 	;;
 *)
 	echo "Err: Wrong arguments" >&2
-	exit 1
+	exit ${ERR}
 	;;
 esac

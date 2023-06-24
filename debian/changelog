@@ -1,3 +1,10 @@
+dvbondemand (1.20) unstable; urgency=medium
+
+  * List status:
+    formatted printing
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Fri, 23 Jun 2023 21:39:34 +0200
+
 dvbondemand (1.19) unstable; urgency=medium
 
   * Set properties to stop systemd services.
