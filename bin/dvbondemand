@@ -40,16 +40,13 @@ _trim() {
 
 _lsof() {
 	local f="${1}" \
-		inum
-	inum="$(ls -i "$(readlink -f "${f}")" 2> /dev/null)" && \
+		inum pids
+	pids="$(inum="$(ls -i "$(readlink -f "${f}")" 2> /dev/null)" && \
 	find /proc/+([0-9])/fd -follow -inum ${inum%% *} 2> /dev/null | \
-		awk '/^\/proc\/1\// {next}
-		{ if (match($0, /^\/proc\/([[:digit:]]+)\/, m)) {
-			print m[1]
-			rc=-1 }
-		}
-		END{exit rc+1}' | \
-			sort -n -u
+		cut -f 3 -s -d '/' | \
+		sort -n -u | \
+		grep -sxv 1)" || :
+	test -n "${pids}"
 }
 
 _ps_children() {
@@ -493,7 +490,7 @@ SelectAdapter() {
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		if _lsof "/dev/dvb/adapter${card}/demux${tuner}" > /dev/null || \
+		if _lsof "/dev/dvb/adapter${card}/demux${tuner}" || \
 		printf '%s' "${Servers}" | \
 		awk -v card="${card}" -v tuner="${tuner}" \
 		'BEGIN{RS=" "; FS=":"}
