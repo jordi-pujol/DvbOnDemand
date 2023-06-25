@@ -42,12 +42,13 @@ _lsof() {
 	local f="${1}" \
 		inum
 	inum="$(ls -i "$(readlink -f "${f}")" 2> /dev/null)" && \
-	{ find /proc/+([0-9])/fd -follow -inum ${inum%% *} 2> /dev/null
-	echo ""
-	} | \
-		sed -nr -e '\|^/proc/1/|d' \
-		-e '\|^/proc/([[:digit:]]+)/.*|{s||\1|;h;p}' \
-		-e '${x;/./!{q1}}' | \
+	find /proc/+([0-9])/fd -follow -inum ${inum%% *} 2> /dev/null | \
+		awk '/^\/proc\/1\// {next}
+		{ if (match($0, /^\/proc\/([[:digit:]]+)\/, m)) {
+			print m[1]
+			rc=-1 }
+		}
+		END{exit rc+1}' | \
 			sort -n -u
 }
 
@@ -392,7 +393,7 @@ StartServer() {
 			_applog "Info: ${servername} is running"
 		clients=""
 		c=${IdleTimeout}
-		d=7
+		d=5
 		while systemctl --quiet is-active "${unit}" && \
 		let "c-=2"; do
 			sleep 2
@@ -411,7 +412,7 @@ StartServer() {
 					_applog "${msg}"
 					[ -z "${ExitPoints}" ] || \
 						((OnStartFail "${msg}" "${clientIP}") &)
-					d=7
+					d=5
 					sleep 2
 					continue
 				fi
