@@ -41,12 +41,11 @@ _trim() {
 _lsof() {
 	local f="${1}" \
 		inum pids
-	pids="$(inum="$(ls -i "$(readlink -f "${f}")" 2> /dev/null)" && \
-	find /proc/+([0-9])/fd -follow -inum ${inum%% *} 2> /dev/null | \
+	inum="$(ls -i "$(readlink -f "${f}")" 2>> "${devNull}" )" && \
+	( find /proc/+([0-9])/fd -follow -inum ${inum%% *} 2>> "${devNull}" || : ) | \
 		cut -f 3 -s -d '/' | \
 		sort -n -u | \
-		grep -sxv 1)" || :
-	test -n "${pids}"
+		grep -sxvF "1"
 }
 
 _ps_children() {
@@ -216,10 +215,12 @@ LoadConfig() {
 	! printf '%s\n' "${@}" | grep -qsxiF 'xtrace' || \
 		Debug="xtrace"
 	set +o xtrace
+	devNull="/dev/null"
 	if [ "${Debug}" = "xtrace" ]; then
 		export PS4='+\t ${LINENO}:${FUNCNAME:+"${FUNCNAME}:"} '
 		exec {BASH_XTRACEFD}>> "${LOG}.xtrace"
 		set -o xtrace
+		devNull="${LOG}.xtrace"
 	fi
 
 	BackupRotate
@@ -490,7 +491,7 @@ SelectAdapter() {
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		if _lsof "/dev/dvb/adapter${card}/demux${tuner}" || \
+		if _lsof "/dev/dvb/adapter${card}/demux${tuner}" > /dev/null || \
 		printf '%s' "${Servers}" | \
 		awk -v card="${card}" -v tuner="${tuner}" \
 		'BEGIN{RS=" "; FS=":"}
@@ -547,7 +548,7 @@ _exit() {
 Main() {
 	# internal variables, daemon scope
 	local reloadConfig line portHttp config card tuner dvbtype clientIP \
-		clients msg msg1
+		clients msg msg1 devNull
 
 	trap '_exit' EXIT
 	trap 'exit' INT
