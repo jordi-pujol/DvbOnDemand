@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.20 $
+#  $Revision: 1.21 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -40,7 +40,7 @@ _trim() {
 
 _lsof() {
 	local f="${1}" \
-		inum pids
+		inum
 	inum="$(ls -i "$(readlink -f "${f}")" 2>> "${devNull}" )" && \
 	( find /proc/+([0-9])/fd -follow -inum ${inum%% *} 2>> "${devNull}" || : ) | \
 		cut -f 3 -s -d '/' | \
@@ -346,11 +346,100 @@ ServerName() {
 	echo "mumudvb server ${dvbtype} ${portHttp}:${card}:${tuner}"
 }
 
+GetPlaylist() {
+	# global servername clientIP unit playlist stuck
+	local c=5 \
+		msg
+	: > "${playlist}"
+	stuck=""
+	while systemctl --quiet is-active "${unit}" && \
+	[ ! -s "${playlist}" ]; do
+		sleep 2
+		if ! wget --quiet -O "${playlist}" \
+		"http://$(hostname):${portHttp}/playlist.m3u" || \
+		[ $(wc -l < "${playlist}") -le 1 ]; then
+			: > "${playlist}"
+			! let "c--" || \
+				continue
+			[ -z "${stuck}" ] || \
+				return ${ERR}
+			stuck="y"
+			systemctl --quiet restart "${unit}"
+			msg="Warn: ${servername} is stuck. Restarting it"
+			_applog "${msg}"
+			[ -z "${ExitPoints}" ] || \
+				((OnStartFail "${msg}" "${clientIP}") &)
+			c=5
+			sleep 2
+		fi
+	done
+	systemctl --quiet is-active "${unit}" && \
+	[ -s "${playlist}" ] || \
+		return ${ERR}
+	stuck=""
+	msg="Info: ${servername} is available"
+	_applog "${msg}"
+	[ -z "${ExitPoints}" ] || \
+		((OnAvail "${msg}" "${clientIP}") &)
+	if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
+		[ -z "${Debug}" ] || \
+			_applog "Info: adding playlist \"${playlist}\"" \
+				"to \"playlist.m3u\""
+		[ -s "playlist.m3u" ] && \
+			tail -n +2 "${playlist}" >> "playlist.m3u" || \
+			cp -f "${playlist}" "playlist.m3u"
+	fi
+}
+
+WatchConnections() {
+	# global unit portHttp
+	local clients="" \
+		c=${IdleTimeout} \
+		client connections msg msg1
+	while systemctl --quiet is-active "${unit}" && \
+	let "c-=2"; do
+		sleep 2
+		if connections="$(Traffic ${portHttp})"; then
+			c=${IdleTimeout}
+			[ "${clients}" != "${connections}" ] || \
+				continue
+			msg="Info: ${servername}"
+			msg1="${msg}"
+			_applog "${msg}"
+			if client="$(ClientsDiff "${clients}" "${connections}")"; then
+				msg="Close:\"$(Hostnames ${client})\""
+				msg1="${msg1},${LF}${msg}"
+				_applog "${msg}"
+			fi
+			if client="$(ClientsDiff "${connections}" "${clients}")"; then
+				msg="Open:\"$(Hostnames ${client})\""
+				msg1="${msg1},${LF}${msg}"
+				_applog "${msg}"
+			fi
+			msg="Clients:\"$(Hostnames ${connections})\""
+			msg1="${msg1},${LF}${msg}"
+			_applog "${msg}"
+			[ -z "${ExitPoints}" ] || \
+				((OnConnection "${msg1}" \
+					$(printf '%s\n' ${connections} ${clients} | \
+					cut -f 1 -d ':' | sort -u)) &)
+			clients="${connections}"
+		elif [ -n "${clients}" ]; then
+			msg="Info: ${servername} All closed:\"$(Hostnames ${clients})\""
+			_applog "${msg}"
+			[ -z "${ExitPoints}" ] || \
+				((OnConnection "${msg}" \
+					$(printf '%s\n' ${clients} | \
+					cut -f 1 -d ':' | sort -u)) &)
+			clients=""
+		fi
+	done
+}
+
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
-	local conffile tmpconf log_file c d playlist \
-		unit clients client connections stuck \
-		servername msg msg1
+	local conffile tmpconf log_file playlist \
+		unit stuck servername msg
 
 	servername="$(ServerName)"
 	RuleClean ${portHttp}
@@ -364,9 +453,7 @@ StartServer() {
 		< "${conffile}" > "${tmpconf}"
 
 	: > "${log_file}"
-	: > "${playlist}"
 	unit="${NAME}-${portHttp}.service"
-	stuck=""
 	chown _mumudvb:video "${log_file}"
 	systemd-run --quiet \
 		--working-directory="${Workdir}" \
@@ -385,84 +472,12 @@ StartServer() {
 		[ -z "${ExitPoints}" ] || \
 			((OnStart "${msg}" "${clientIP}") &)
 	sleep 2
-	c=${IdleTimeout}
 	if systemctl --quiet is-active "${unit}"; then
 		[ -z "${Debug}" ] || \
 			_applog "Info: ${servername} is running"
-		clients=""
-		c=${IdleTimeout}
-		d=5
-		while systemctl --quiet is-active "${unit}" && \
-		let "c-=2"; do
-			sleep 2
-			if [ ! -s "${playlist}" ]; then
-				if ! wget --quiet -O "${playlist}" \
-				"http://$(hostname):${portHttp}/playlist.m3u" || \
-				[ $(wc -l < "${playlist}") -le 1 ]; then
-					: > "${playlist}"
-					! let "d--" || \
-						continue
-					[ -z "${stuck}" ] || \
-						break
-					stuck="y"
-					systemctl --quiet restart "${unit}"
-					msg="Warn: ${servername} is stuck. Restarting it"
-					_applog "${msg}"
-					[ -z "${ExitPoints}" ] || \
-						((OnStartFail "${msg}" "${clientIP}") &)
-					d=5
-					sleep 2
-					continue
-				fi
-				stuck=""
-				msg="Info: ${servername} is available"
-				_applog "${msg}"
-				[ -z "${ExitPoints}" ] || \
-					((OnAvail "${msg}" "${clientIP}") &)
-				if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
-					[ -z "${Debug}" ] || \
-						_applog "Info: adding playlist \"${playlist}\"" \
-							"to \"playlist.m3u\""
-					[ -s "playlist.m3u" ] && \
-						tail -n +2 "${playlist}" >> "playlist.m3u" || \
-						cp -f "${playlist}" "playlist.m3u"
-				fi
-			fi
-			if connections="$(Traffic ${portHttp})"; then
-				c=${IdleTimeout}
-				[ "${clients}" != "${connections}" ] || \
-					continue
-				msg="Info: ${servername}"
-				msg1="${msg}"
-				_applog "${msg}"
-				if client="$(ClientsDiff "${clients}" "${connections}")"; then
-					msg="Close:\"$(Hostnames ${client})\""
-					msg1="${msg1},${LF}${msg}"
-					_applog "${msg}"
-				fi
-				if client="$(ClientsDiff "${connections}" "${clients}")"; then
-					msg="Open:\"$(Hostnames ${client})\""
-					msg1="${msg1},${LF}${msg}"
-					_applog "${msg}"
-				fi
-				msg="Clients:\"$(Hostnames ${connections})\""
-				msg1="${msg1},${LF}${msg}"
-				_applog "${msg}"
-				[ -z "${ExitPoints}" ] || \
-					((OnConnection "${msg1}" \
-						$(printf '%s\n' ${connections} ${clients} | \
-						cut -f 1 -d ':' | sort -u)) &)
-				clients="${connections}"
-			elif [ -n "${clients}" ]; then
-				msg="Info: ${servername} All closed:\"$(Hostnames ${clients})\""
-				_applog "${msg}"
-				[ -z "${ExitPoints}" ] || \
-					((OnConnection "${msg}" \
-						$(printf '%s\n' ${clients} | \
-						cut -f 1 -d ':' | sort -u)) &)
-				clients=""
-			fi
-		done
+		if GetPlaylist; then
+			WatchConnections
+		fi
 		if systemctl --quiet is-active "${unit}"; then
 			_msg "Info: ${servername} is" \
 				"$(test -n "${stuck}" && echo "stuck" || echo "idle")." \
