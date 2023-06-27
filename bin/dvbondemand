@@ -55,7 +55,7 @@ _ps_children() {
 	for pid in $(pgrep -P ${ppid} | \
 	grep -svwEe "${excl}"); do
 		_ps_children ${pid} "${excl}"
-		pidsChildren="${pidsChildren} ${pid}"
+		printf '%d\t' ${pid}
 	done
 }
 
@@ -529,7 +529,7 @@ StartServer() {
 			pidJournal=${!}
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
-			pidsChildren=${pidJournal}; _ps_children ${pidJournal}
+			pidsChildren="${pidJournal} $(_ps_children ${pidJournal})"
 			kill -s TERM ${pidsChildren} 2> /dev/null || :
 			wait ${pidsChildren} || :
 			[ -z "${pidWait}" ] || {
@@ -613,7 +613,7 @@ _exit() {
 		sleep 1
 	fi
 	RuleClean
-	pidsChildren=""; _ps_children
+	pidsChildren="$(_ps_children)"
 	[ -z "${pidsChildren}" ] || \
 		kill -s TERM ${pidsChildren} 2> /dev/null || :
 	wait || :
