@@ -435,7 +435,7 @@ WatchConnections() {
 			return ${OK}
 		if connections="$(Traffic ${portHttp})"; then
 			[ -z "${pidWait}" ] || {
-				kill -TERM ${pidWait} 2> /dev/null || :
+				kill -s TERM ${pidWait} 2> /dev/null || :
 				wait ${pidWait} || :
 				pidWait=""
 			}
