@@ -420,6 +420,7 @@ WatchConnections() {
 		line client connections msg msg1
 	if connections="$(Traffic ${portHttp})"; then
 		echo "CONNECTED" >> "${pipe}"
+		pidWait=""
 	else
 		( set +o xtrace
 		c=${IdleTimeout}
