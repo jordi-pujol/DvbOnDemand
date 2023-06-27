@@ -434,7 +434,7 @@ WatchConnections() {
 		if connections="$(Traffic ${portHttp})"; then
 			[ -z "${pidWait}" ] || {
 				kill -s TERM ${pidWait} 2>> "${devNull}" || :
-				wait ${pidWait} || :
+				wait ${pidWait} 2>> "${devNull}" || :
 				pidWait=""
 			}
 			[ "${clients}" != "${connections}" ] || \
@@ -532,10 +532,10 @@ StartServer() {
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
 			pidsChildren="${pidJournal} $(_ps_children ${pidJournal})"
 			kill -s TERM ${pidsChildren} 2>> "${devNull}" || :
-			wait ${pidsChildren} || :
+			wait ${pidsChildren} 2>> "${devNull}" || :
 			[ -z "${pidWait}" ] || {
 				kill -s TERM ${pidWait} 2>> "${devNull}" || :
-				wait ${pidWait} || :
+				wait ${pidWait} 2>> "${devNull}" || :
 				pidWait=""
 			}
 		fi
@@ -618,7 +618,7 @@ _exit() {
 	pidsChildren="$(_ps_children)"
 	[ -z "${pidsChildren}" ] || \
 		kill -s TERM ${pidsChildren} 2>> "${devNull}" || :
-	wait || :
+	wait 2>> "${devNull}" || :
 	_applog "Daemon exit"
 }
 
