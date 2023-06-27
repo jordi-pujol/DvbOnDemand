@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.21 $
+#  $Revision: 1.22 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -52,6 +52,9 @@ _ps_children() {
 	local ppid=${1:-${$}} \
 		excl="${2:-"0"}" \
 		pid
+	[ -z "${pidsChildren}" ] || \
+		[ "${pidsChildren: -1}" = "${TAB}" ] || \
+			pidsChildren="${pidsChildren}${TAB}"
 	for pid in $(pgrep -P ${ppid} | \
 	grep -svwEe "${excl}"); do
 		_ps_children ${pid} "${excl}"
@@ -122,6 +125,7 @@ RuleInsert() {
 
 RuleClean() {
 	local portHttp="${1:-}" \
+		prefix="${2:-}" \
 		rule n port d="y"
 	port="${portHttp}"
 	until [ -z "${d}" ]; do
@@ -129,19 +133,38 @@ RuleClean() {
 		n=1
 		while rule="$(iptables -4 --wait --numeric --list INPUT ${n})" && \
 		[ -n "${rule}" ]; do
-			if grep -qse "LOG.*tcp dpt:${portHttp:-".*"} .*prefix \"${NEWREQUEST}\"" \
+			if grep -qse \
+			"LOG.*tcp dpt:${portHttp:-".*"} .*prefix \"${prefix:-"${NEWREQUEST}"}\"" \
 			<<< "${rule}"; then
 				iptables -4 --wait --delete INPUT ${n}
 				[ -n "${portHttp}" ] || \
 					port="$(sed -nre "/.*tcp dpt:([[:digit:]]+) .*/s//\1/p" \
 						<<< "${rule}")"
-				_applog "Info: removing watch on port ${port}"
+				_applog "Info: removing watch \"${prefix:-"${NEWREQUEST}"}\" on port ${port}"
 				d="y"
 			else
 				let "n++,1"
 			fi
 		done
 	done
+}
+
+RuleInsertClient() {
+	local portHttp="${1}"
+	iptables -4 --wait -I INPUT -p tcp \
+		-m tcp --dport ${portHttp} \
+		--tcp-flags FIN FIN \
+		-j LOG --log-level info --log-prefix "${CLIENTCONNECT}${portHttp}"
+	iptables -4 --wait -I INPUT -p tcp \
+		-m tcp --dport ${portHttp} \
+		--tcp-flags RST RST \
+		-j LOG --log-level info --log-prefix "${CLIENTCONNECT}${portHttp}"
+	iptables -4 --wait -I INPUT -p tcp \
+		-m tcp --dport ${portHttp} \
+		-m state --state NEW \
+		-j LOG --log-level info --log-prefix "${CLIENTCONNECT}${portHttp}"
+	[ -z "${Debug}" ] || \
+		_applog "Info: watch client connection port ${portHttp}"
 }
 
 Hostnames() {
@@ -392,15 +415,29 @@ GetPlaylist() {
 }
 
 WatchConnections() {
-	# global unit portHttp
+	# global unit portHttp pidJournal pidWait pipe
 	local clients="" \
-		c=${IdleTimeout} \
-		client connections msg msg1
-	while systemctl --quiet is-active "${unit}" && \
-	let "c-=2"; do
-		sleep 2
+		line client connections msg msg1
+	if connections="$(Traffic ${portHttp})"; then
+		echo "CONNECTED" >> "${pipe}"
+	else
+		( set +o xtrace
+		c=${IdleTimeout}
+		while let "c--"; do sleep 1; done && \
+			echo "${SERVEREND}" >> "${pipe}" ) &
+		pidWait=${!}
+	fi
+	while systemctl --quiet is-active "${unit}"; do
+		read -r line < "${pipe}" || \
+			continue
+		[ "${line}" != "${SERVEREND}" ] || \
+			return ${OK}
 		if connections="$(Traffic ${portHttp})"; then
-			c=${IdleTimeout}
+			[ -z "${pidWait}" ] || {
+				kill -TERM ${pidWait} 2> /dev/null || :
+				wait ${pidWait} || :
+				pidWait=""
+			}
 			[ "${clients}" != "${connections}" ] || \
 				continue
 			msg="Info: ${servername}"
@@ -432,6 +469,11 @@ WatchConnections() {
 					$(printf '%s\n' ${clients} | \
 					cut -f 1 -d ':' | sort -u)) &)
 			clients=""
+			( set +o xtrace
+			c=${IdleTimeout}
+			while let "c--"; do sleep 1; done && \
+				echo "${SERVEREND}" >> "${pipe}" ) &
+			pidWait=${!}
 		fi
 	done
 }
@@ -439,6 +481,7 @@ WatchConnections() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf log_file playlist \
+		pidJournal pidWait pipe \
 		unit stuck servername msg
 
 	servername="$(ServerName)"
@@ -476,7 +519,26 @@ StartServer() {
 		[ -z "${Debug}" ] || \
 			_applog "Info: ${servername} is running"
 		if GetPlaylist; then
+			RuleInsertClient ${portHttp}
+			pipe="${portHttp}-pipe"
+			[ -e "${pipe}" ] || \
+				mkfifo "${pipe}"
+			(while :; do
+				journalctl --since="@$(_UTCseconds)" \
+				--follow "--grep=${CLIENTCONNECT}${portHttp}" --output=cat  | \
+				cat - >> "${pipe}" || :
+			done) &
+			pidJournal=${!}
 			WatchConnections
+			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
+			pidsChildren=${pidJournal}; _ps_children ${pidJournal}
+			kill -s TERM ${pidsChildren} 2> /dev/null || :
+			wait ${pidsChildren} || :
+			[ -z "${pidWait}" ] || {
+				kill -s TERM ${pidWait} 2> /dev/null || :
+				wait ${pidWait} || :
+				pidWait=""
+			}
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			_msg "Info: ${servername} is" \
@@ -582,7 +644,7 @@ Main() {
 	(while :; do
 		journalctl --since="@$(_UTCseconds)" \
 		--follow "--grep=${NEWREQUEST}" --output=cat | \
-		cat - > "${PIPE}" || :
+		cat - >> "${PIPE}" || :
 	done) &
 
 	while :; do
@@ -687,6 +749,7 @@ readonly NAME \
 	OK=0 ERR=1 LF=$'\n' TAB=$'\t' NONE=0 \
 	NEWREQUEST="${NAME}New:" \
 	SERVEREND="ServerEnd:" \
+	CLIENTCONNECT="CliConnect:"
 	RELOAD="reloadConfig"
 # config variables
 declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
