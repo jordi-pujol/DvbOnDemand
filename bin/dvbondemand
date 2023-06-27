@@ -518,7 +518,6 @@ StartServer() {
 		[ -z "${Debug}" ] || \
 			_applog "Info: ${servername} is running"
 		if GetPlaylist; then
-			RuleInsertClient ${portHttp}
 			pipe="${portHttp}-pipe"
 			[ -e "${pipe}" ] || \
 				mkfifo "${pipe}"
@@ -528,6 +527,7 @@ StartServer() {
 				cat - >> "${pipe}" || :
 			done) &
 			pidJournal=${!}
+			RuleInsertClient ${portHttp}
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
 			pidsChildren="${pidJournal} $(_ps_children ${pidJournal})"
