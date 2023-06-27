@@ -245,9 +245,10 @@ LoadConfig() {
 
 	BackupRotate
 	RuleClean
+	RuleClean "" "${CLIENTCONNECT}.*"
 
 	unset $(set | awk -F '=' \
-		'$1 ~ /^(adapter|config)[[:digit:]]*_/ {print $1}') 2> /dev/null || :
+		'$1 ~ /^(adapter|config)[[:digit:]]*_/ {print $1}') 2>> "${devNull}" || :
 	ind=0
 	while read -r line; do
 		case "${ind}" in
@@ -348,7 +349,7 @@ LoadConfig() {
 			[ -z "${name}" -o -z "${service_id}" ] || \
 				eval config${Configs}_service_${service_id}='${name}'
 			RuleInsert $((PortHttp+Configs))
-		done < <(ls -1 /etc/mumudvb/${dvbtype}_*.conf 2> /dev/null)
+		done < <(ls -1 /etc/mumudvb/${dvbtype}_*.conf 2>> "${devNull}")
 	done
 
 	reloadConfig=""
@@ -432,7 +433,7 @@ WatchConnections() {
 			return ${OK}
 		if connections="$(Traffic ${portHttp})"; then
 			[ -z "${pidWait}" ] || {
-				kill -s TERM ${pidWait} 2> /dev/null || :
+				kill -s TERM ${pidWait} 2>> "${devNull}" || :
 				wait ${pidWait} || :
 				pidWait=""
 			}
@@ -530,10 +531,10 @@ StartServer() {
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
 			pidsChildren="${pidJournal} $(_ps_children ${pidJournal})"
-			kill -s TERM ${pidsChildren} 2> /dev/null || :
+			kill -s TERM ${pidsChildren} 2>> "${devNull}" || :
 			wait ${pidsChildren} || :
 			[ -z "${pidWait}" ] || {
-				kill -s TERM ${pidWait} 2> /dev/null || :
+				kill -s TERM ${pidWait} 2>> "${devNull}" || :
 				wait ${pidWait} || :
 				pidWait=""
 			}
@@ -613,9 +614,10 @@ _exit() {
 		sleep 1
 	fi
 	RuleClean
+	RuleClean "" "${CLIENTCONNECT}.*"
 	pidsChildren="$(_ps_children)"
 	[ -z "${pidsChildren}" ] || \
-		kill -s TERM ${pidsChildren} 2> /dev/null || :
+		kill -s TERM ${pidsChildren} 2>> "${devNull}" || :
 	wait || :
 	_applog "Daemon exit"
 }
