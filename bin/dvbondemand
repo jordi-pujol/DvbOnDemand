@@ -52,13 +52,10 @@ _ps_children() {
 	local ppid=${1:-${$}} \
 		excl="${2:-"0"}" \
 		pid
-	[ -z "${pidsChildren}" ] || \
-		[ "${pidsChildren: -1}" = "${TAB}" ] || \
-			pidsChildren="${pidsChildren}${TAB}"
 	for pid in $(pgrep -P ${ppid} | \
 	grep -svwEe "${excl}"); do
 		_ps_children ${pid} "${excl}"
-		pidsChildren="${pidsChildren}${pid}${TAB}"
+		pidsChildren="${pidsChildren} ${pid}"
 	done
 }
 
@@ -125,7 +122,7 @@ RuleInsert() {
 
 RuleClean() {
 	local portHttp="${1:-}" \
-		prefix="${2:-}" \
+		prefix="${2:-"${NEWREQUEST}"}" \
 		rule n port d="y"
 	port="${portHttp}"
 	until [ -z "${d}" ]; do
@@ -134,13 +131,13 @@ RuleClean() {
 		while rule="$(iptables -4 --wait --numeric --list INPUT ${n})" && \
 		[ -n "${rule}" ]; do
 			if grep -qse \
-			"LOG.*tcp dpt:${portHttp:-".*"} .*prefix \"${prefix:-"${NEWREQUEST}"}\"" \
+			"LOG.*tcp dpt:${portHttp:-".*"} .*prefix \"${prefix}\"" \
 			<<< "${rule}"; then
 				iptables -4 --wait --delete INPUT ${n}
 				[ -n "${portHttp}" ] || \
 					port="$(sed -nre "/.*tcp dpt:([[:digit:]]+) .*/s//\1/p" \
 						<<< "${rule}")"
-				_applog "Info: removing watch \"${prefix:-"${NEWREQUEST}"}\" on port ${port}"
+				_applog "Info: removing watch \"${prefix}\" on port ${port}"
 				d="y"
 			else
 				let "n++,1"
