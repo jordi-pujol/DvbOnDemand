@@ -107,7 +107,7 @@ RuleInsert() {
 	local portHttp="${1}" \
 		config conffile
 	[ -z "${Debug}" ] || \
-		! Traffic ${portHttp} > /dev/null || \
+		! Traffic ${portHttp} >> "${devNull}" || \
 			_applog "Warn: will set watch on port ${portHttp}" \
 				"when server is already active"
 	iptables -4 --wait -I INPUT -p tcp \
@@ -567,7 +567,7 @@ SelectAdapter() {
 	while read -r adapter; do
 		eval card=\"\${adapter${adapter}_card:-}\"
 		eval tuner=\"\${adapter${adapter}_tuner:-}\"
-		if _lsof "/dev/dvb/adapter${card}/demux${tuner}" > /dev/null || \
+		if _lsof "/dev/dvb/adapter${card}/demux${tuner}" >> "${devNull}" || \
 		printf '%s' "${Servers}" | \
 		awk -v card="${card}" -v tuner="${tuner}" \
 		'BEGIN{RS=" "; FS=":"}
@@ -660,7 +660,7 @@ Main() {
 			'BEGIN{RS=" "; FS=":"}
 			$1 == portHttp {rc=-1; exit}
 			END{exit rc+1}' || \
-			Traffic ${portHttp} > /dev/null; then
+			Traffic ${portHttp} >> "${devNull}"; then
 				[ -z "${Debug}" ] || \
 					_applog "Warn: received new request" \
 						"for already active port ${portHttp}"
