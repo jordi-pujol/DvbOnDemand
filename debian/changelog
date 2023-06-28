@@ -1,3 +1,9 @@
+dvbondemand (1.23) unstable; urgency=medium
+
+  * stop watching timeout when mumudvb has been stopped
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Wed, 28 Jun 2023 17:04:29 +0200
+
 dvbondemand (1.22) unstable; urgency=medium
 
   * use iptables log to track client's connection and disconnection

@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.22 $
+#  $Revision: 1.23 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -412,19 +412,34 @@ GetPlaylist() {
 	fi
 }
 
+SetWatchdog() {
+	set +o xtrace
+	c=${IdleTimeout}
+	while systemctl --quiet is-active "${unit}" && \
+	let "c--"; do
+		sleep 1
+	done && \
+		echo "${SERVEREND}" >> "${pipe}"
+}
+
+EndWatchdog() {
+	[ -n "${pidWatchdog}" ] || \
+		return ${OK}
+	kill -s TERM ${pidWatchdog} 2>> "${devNull}" || :
+	wait ${pidWatchdog} 2>> "${devNull}" || :
+	pidWatchdog=""
+}
+
 WatchConnections() {
-	# global unit portHttp pidJournal pidWait pipe
+	# global unit portHttp pidJournal pidWatchdog pipe
 	local clients="" \
 		line client connections msg msg1
 	if connections="$(Traffic ${portHttp})"; then
 		echo "CONNECTED" >> "${pipe}"
-		pidWait=""
+		pidWatchdog=""
 	else
-		( set +o xtrace
-		c=${IdleTimeout}
-		while let "c--"; do sleep 1; done && \
-			echo "${SERVEREND}" >> "${pipe}" ) &
-		pidWait=${!}
+		SetWatchdog &
+		pidWatchdog=${!}
 	fi
 	while systemctl --quiet is-active "${unit}"; do
 		read -r line < "${pipe}" || \
@@ -432,11 +447,7 @@ WatchConnections() {
 		[ "${line}" != "${SERVEREND}" ] || \
 			return ${OK}
 		if connections="$(Traffic ${portHttp})"; then
-			[ -z "${pidWait}" ] || {
-				kill -s TERM ${pidWait} 2>> "${devNull}" || :
-				wait ${pidWait} 2>> "${devNull}" || :
-				pidWait=""
-			}
+			EndWatchdog
 			[ "${clients}" != "${connections}" ] || \
 				continue
 			msg="Info: ${servername}"
@@ -468,11 +479,8 @@ WatchConnections() {
 					$(printf '%s\n' ${clients} | \
 					cut -f 1 -d ':' | sort -u)) &)
 			clients=""
-			( set +o xtrace
-			c=${IdleTimeout}
-			while let "c--"; do sleep 1; done && \
-				echo "${SERVEREND}" >> "${pipe}" ) &
-			pidWait=${!}
+			SetWatchdog &
+			pidWatchdog=${!}
 		fi
 	done
 }
@@ -480,7 +488,7 @@ WatchConnections() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf log_file playlist \
-		pidJournal pidWait pipe \
+		pidJournal pidWatchdog pipe \
 		unit stuck servername msg
 
 	servername="$(ServerName)"
@@ -530,14 +538,10 @@ StartServer() {
 			RuleInsertClient ${portHttp}
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
+			EndWatchdog
 			pidsChildren="${pidJournal} $(_ps_children ${pidJournal})"
 			kill -s TERM ${pidsChildren} 2>> "${devNull}" || :
 			wait ${pidsChildren} 2>> "${devNull}" || :
-			[ -z "${pidWait}" ] || {
-				kill -s TERM ${pidWait} 2>> "${devNull}" || :
-				wait ${pidWait} 2>> "${devNull}" || :
-				pidWait=""
-			}
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			_msg "Info: ${servername} is" \
