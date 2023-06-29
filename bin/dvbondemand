@@ -431,7 +431,6 @@ EndWatchdog() {
 }
 
 CreateEmptyPipe() {
-	pipe="${portHttp}-pipe"
 	rm -f "${pipe}"
 	mkfifo "${pipe}"
 	chmod a+rw "${pipe}"
@@ -511,6 +510,7 @@ StartServer() {
 
 	: > "${log_file}"
 	unit="${NAME}-${portHttp}.service"
+	pipe="${portHttp}-pipe"
 	CreateEmptyPipe
 	chown _mumudvb:video "${log_file}"
 	systemd-run --quiet \
