@@ -504,7 +504,11 @@ StartServer() {
 
 	: > "${log_file}"
 	unit="${NAME}-${portHttp}.service"
+	pipe="${portHttp}-pipe"
+	[ -e "${pipe}" ] || \
+		mkfifo "${pipe}"
 	chown _mumudvb:video "${log_file}"
+	chmod a+rw "${pipe}"
 	systemd-run --quiet \
 		--working-directory="${Workdir}" \
 		--unit="${unit}" \
@@ -512,6 +516,7 @@ StartServer() {
 		--gid=video \
 		--property="StandardOutput=append:${Workdir}${log_file}" \
 		--property="StandardError=append:${Workdir}${log_file}" \
+		--property="ExecStopPost=/bin/bash -c 'echo ${SERVEREND} >> ${pipe}'" \
 		--property="KillMode=mixed" \
 		--property="KillSignal=INT" \
 		--property="TimeoutStopSec=10s" \
@@ -526,9 +531,6 @@ StartServer() {
 		[ -z "${Debug}" ] || \
 			_applog "Info: ${servername} is running"
 		if GetPlaylist; then
-			pipe="${portHttp}-pipe"
-			[ -e "${pipe}" ] || \
-				mkfifo "${pipe}"
 			(while :; do
 				journalctl --since="@$(_UTCseconds)" \
 				--follow "--grep=${CLIENTCONNECT}${portHttp}" --output=cat  | \
