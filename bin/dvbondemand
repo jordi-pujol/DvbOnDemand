@@ -437,9 +437,8 @@ EndWatchdog() {
 }
 
 WatchConnections() {
-	# global unit portHttp pidJournal pidWatchdog pipe
-	local clients="" \
-		line client connections msg msg1
+	# global unit portHttp pidJournal pidWatchdog pipe clients
+	local line client connections msg msg1
 	if connections="$(Traffic ${portHttp})"; then
 		echo "CONNECTED" >> "${pipe}"
 		pidWatchdog=""
@@ -495,7 +494,7 @@ StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf log_file playlist \
 		pidJournal pidWatchdog pipe pids \
-		unit stuck servername msg
+		clients="" unit stuck servername msg
 
 	servername="$(ServerName)"
 	RuleClean ${portHttp}
@@ -560,13 +559,17 @@ StartServer() {
 		fi
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
-			((OnStop "${msg}" "${clientIP}") &)
+			((OnStop "${msg}" \
+				$(printf '%s\n' ${clientIP} ${clients} | \
+				cut -f 1 -d ':' | sort -u)) &)
 		sleep 2
 	else
 		msg="Err: ${servername} doesn't run"
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
-			((OnStartFail "${msg}" "${clientIP}") &)
+			((OnStartFail "${msg}" \
+				$(printf '%s\n' ${clientIP} ${clients} | \
+				cut -f 1 -d ':' | sort -u)) &)
 	fi
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
