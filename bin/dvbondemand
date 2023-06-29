@@ -494,7 +494,7 @@ WatchConnections() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf log_file playlist \
-		pidJournal pidWatchdog pipe \
+		pidJournal pidWatchdog pipe pids \
 		unit stuck servername msg
 
 	servername="$(ServerName)"
@@ -546,9 +546,9 @@ StartServer() {
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
 			EndWatchdog
-			pidsChildren="${pidJournal} $(_ps_children ${pidJournal})"
-			kill -s TERM ${pidsChildren} 2>> "${devNull}" || :
-			wait ${pidsChildren} 2>> "${devNull}" || :
+			pids="${pidJournal} $(_ps_children ${pidJournal})"
+			kill -s TERM ${pids} 2>> "${devNull}" || :
+			wait ${pids} 2>> "${devNull}" || :
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			_msg "Info: ${servername} is" \
@@ -626,9 +626,9 @@ _exit() {
 	fi
 	RuleClean
 	RuleClean "" "${CLIENTCONNECT}.*"
-	pidsChildren="$(_ps_children)"
-	[ -z "${pidsChildren}" ] || \
-		kill -s TERM ${pidsChildren} 2>> "${devNull}" || :
+	pids="$(_ps_children)"
+	[ -z "${pids}" ] || \
+		kill -s TERM ${pids} 2>> "${devNull}" || :
 	wait 2>> "${devNull}" || :
 	_applog "Daemon exit"
 }
