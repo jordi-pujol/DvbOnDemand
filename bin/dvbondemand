@@ -430,6 +430,13 @@ EndWatchdog() {
 	pidWatchdog=""
 }
 
+CreateEmptyPipe() {
+	pipe="${portHttp}-pipe"
+	rm -f "${pipe}"
+	mkfifo "${pipe}"
+	chmod a+rw "${pipe}"
+}
+
 WatchConnections() {
 	# global unit portHttp pidJournal pidWatchdog pipe
 	local clients="" \
@@ -504,11 +511,8 @@ StartServer() {
 
 	: > "${log_file}"
 	unit="${NAME}-${portHttp}.service"
-	pipe="${portHttp}-pipe"
-	[ -e "${pipe}" ] || \
-		mkfifo "${pipe}"
+	CreateEmptyPipe
 	chown _mumudvb:video "${log_file}"
-	chmod a+rw "${pipe}"
 	systemd-run --quiet \
 		--working-directory="${Workdir}" \
 		--unit="${unit}" \
@@ -531,6 +535,7 @@ StartServer() {
 		[ -z "${Debug}" ] || \
 			_applog "Info: ${servername} is running"
 		if GetPlaylist; then
+			CreateEmptyPipe
 			(while :; do
 				journalctl --since="@$(_UTCseconds)" \
 				--follow "--grep=${CLIENTCONNECT}${portHttp}" --output=cat  | \
