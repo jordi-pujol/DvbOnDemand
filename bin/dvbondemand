@@ -76,6 +76,13 @@ _applog() {
 	printf '%s\n' "$(_datetime) ${msg}" >> "${LOG}"
 }
 
+CreateEmptyPipe() {
+	local pipe="${1}"
+	rm -f "${pipe}"
+	mkfifo "${pipe}"
+	chmod a+rw "${pipe}"
+}
+
 PreBackupRotate() {
 	local f d=$(_UTCseconds)
 	for f in "${LOG}" "${LOG}.xtrace"; do
@@ -220,8 +227,7 @@ LoadConfig() {
 	mkdir -p "${Workdir}"
 	cd "${Workdir}"
 	rm -f *.{conf,m3u,log} {0..9}* "${STAT}" 2> /dev/null
-	[ -e "${PIPE}" ] || \
-		mkfifo "${PIPE}"
+	CreateEmptyPipe "${PIPE}"
 
 	adapterTypes=""
 	Adapters=${NONE}
@@ -430,12 +436,6 @@ EndWatchdog() {
 	pidWatchdog=""
 }
 
-CreateEmptyPipe() {
-	rm -f "${pipe}"
-	mkfifo "${pipe}"
-	chmod a+rw "${pipe}"
-}
-
 WatchConnections() {
 	# global unit portHttp pidJournal pidWatchdog pipe
 	local clients="" \
@@ -511,7 +511,7 @@ StartServer() {
 	: > "${log_file}"
 	unit="${NAME}-${portHttp}.service"
 	pipe="${portHttp}-pipe"
-	CreateEmptyPipe
+	CreateEmptyPipe "${pipe}"
 	chown _mumudvb:video "${log_file}"
 	systemd-run --quiet \
 		--working-directory="${Workdir}" \
@@ -535,7 +535,7 @@ StartServer() {
 		[ -z "${Debug}" ] || \
 			_applog "Info: ${servername} is running"
 		if GetPlaylist; then
-			CreateEmptyPipe
+			CreateEmptyPipe "${pipe}"
 			(while :; do
 				journalctl --since="@$(_UTCseconds)" \
 				--follow "--grep=${CLIENTCONNECT}${portHttp}" --output=cat  | \
