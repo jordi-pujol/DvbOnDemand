@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.23 $
+#  $Revision: 1.24 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -428,7 +428,7 @@ SetWatchdog() {
 		echo "${SERVEREND}" >> "${pipe}"
 }
 
-EndWatchdog() {
+StopWatchdog() {
 	[ -n "${pidWatchdog}" ] || \
 		return ${OK}
 	kill -s TERM ${pidWatchdog} 2>> "${devNull}" || :
@@ -452,7 +452,7 @@ WatchConnections() {
 		[ "${line}" != "${SERVEREND}" ] || \
 			return ${OK}
 		if connections="$(Traffic ${portHttp})"; then
-			EndWatchdog
+			StopWatchdog
 			[ "${clients}" != "${connections}" ] || \
 				continue
 			msg="Info: ${servername}"
@@ -512,23 +512,24 @@ StartServer() {
 	pipe="${portHttp}-pipe"
 	CreateEmptyPipe "${pipe}"
 	chown _mumudvb:video "${log_file}"
-	systemd-run --quiet \
-		--working-directory="${Workdir}" \
-		--unit="${unit}" \
-		--uid=_mumudvb \
-		--gid=video \
-		--property="StandardOutput=append:${Workdir}${log_file}" \
-		--property="StandardError=append:${Workdir}${log_file}" \
-		--property="ExecStopPost=/bin/bash -c 'echo ${SERVEREND} >> ${pipe}'" \
-		--property="KillMode=mixed" \
-		--property="KillSignal=INT" \
-		--property="TimeoutStopSec=10s" \
-		/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"
-	msg="Info: starting ${servername}"
-	_applog "${msg}"
-	[ -z "${Debug}" ] || \
-		[ -z "${ExitPoints}" ] || \
-			((OnStart "${msg}" "${clientIP}") &)
+	if systemd-run --quiet \
+	--working-directory="${Workdir}" \
+	--unit="${unit}" \
+	--uid=_mumudvb \
+	--gid=video \
+	--property="StandardOutput=append:${Workdir}${log_file}" \
+	--property="StandardError=append:${Workdir}${log_file}" \
+	--property="ExecStopPost=/bin/bash -c 'echo ${SERVEREND} >> ${pipe}'" \
+	--property="KillMode=mixed" \
+	--property="KillSignal=INT" \
+	--property="TimeoutStopSec=10s" \
+	/usr/bin/mumudvb ${Debug:+"-v"} -d -c "${tmpconf}"; then
+		msg="Info: starting ${servername}"
+		_applog "${msg}"
+		[ -z "${Debug}" ] || \
+			[ -z "${ExitPoints}" ] || \
+				((OnStart "${msg}" "${clientIP}") &)
+	fi
 	sleep 2
 	if systemctl --quiet is-active "${unit}"; then
 		[ -z "${Debug}" ] || \
@@ -544,7 +545,7 @@ StartServer() {
 			RuleInsertClient ${portHttp}
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
-			EndWatchdog
+			StopWatchdog
 			pids="${pidJournal} $(_ps_children ${pidJournal})"
 			kill -s TERM ${pids} 2>> "${devNull}" || :
 			wait ${pids} 2>> "${devNull}" || :
@@ -553,7 +554,7 @@ StartServer() {
 			_msg "Info: ${servername} is" \
 				"$(test -n "${stuck}" && echo "stuck" || echo "idle")." \
 				"Stopping it"
-			systemctl --quiet stop "${unit}"
+			systemctl --quiet stop "${unit}" || :
 		else
 			msg="Info: ${servername} has stopped himself"
 		fi
@@ -571,6 +572,7 @@ StartServer() {
 				$(printf '%s\n' ${clientIP} ${clients} | \
 				cut -f 1 -d ':' | sort -u)) &)
 	fi
+	systemctl --quiet reset-failed "${unit}" 2>> "${devNull}" || :
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
 
