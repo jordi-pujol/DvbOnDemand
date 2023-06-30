@@ -383,7 +383,7 @@ GetPlaylist() {
 	[ ! -s "${playlist}" ]; do
 		sleep 2
 		if ! wget --quiet -O "${playlist}" \
-		"http://$(hostname):${portHttp}/playlist.m3u" || \
+		"http://localhost:${portHttp}/playlist.m3u" || \
 		[ $(wc -l < "${playlist}") -le 1 ]; then
 			: > "${playlist}"
 			! let "c--" || \
@@ -793,8 +793,7 @@ status)
 	d="$(_UTCseconds -r "${STAT}")"
 	echo "Info: Updating status file" >&2
 	if [ -z "${SSH_CLIENT:-}" ]; then
-		clientIP="$(hostname -I)"
-		clientIP="${clientIP%% *}"
+		clientIP="127.0.0.1"
 	else
 		clientIP="${SSH_CLIENT%% *}"
 	fi
