@@ -509,6 +509,9 @@ StartServer() {
 
 	: > "${log_file}"
 	unit="${NAME}-${portHttp}.service"
+	if systemctl list-unit-files --all "${unit}" >> "${devNull}" 2>&1; then
+		systemctl --quiet reset-failed "${unit}" 2>> "${devNull}" || :
+	fi
 	pipe="${portHttp}-pipe"
 	CreateEmptyPipe "${pipe}"
 	chown _mumudvb:video "${log_file}"
