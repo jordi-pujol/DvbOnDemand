@@ -391,7 +391,8 @@ GetPlaylist() {
 			[ -z "${stuck}" ] || \
 				return ${ERR}
 			stuck="y"
-			systemctl --quiet restart "${unit}"
+			systemctl --quiet restart "${unit}" || \
+				continue
 			msg="Warn: ${servername} is stuck. Restarting it"
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
@@ -419,13 +420,14 @@ GetPlaylist() {
 }
 
 SetWatchdog() {
-	set +o xtrace
+	( set +o xtrace
 	c=${IdleTimeout}
 	while systemctl --quiet is-active "${unit}" && \
 	let "c--"; do
 		sleep 1
 	done && \
-		echo "${SERVEREND}" >> "${pipe}"
+		echo "${SERVEREND}" >> "${pipe}" ) &
+	pidWatchdog=${!}
 }
 
 StopWatchdog() {
@@ -443,8 +445,7 @@ WatchConnections() {
 		echo "CONNECTED" >> "${pipe}"
 		pidWatchdog=""
 	else
-		SetWatchdog &
-		pidWatchdog=${!}
+		SetWatchdog
 	fi
 	while systemctl --quiet is-active "${unit}"; do
 		read -r line < "${pipe}" || \
@@ -484,8 +485,7 @@ WatchConnections() {
 					$(printf '%s\n' ${clients} | \
 					cut -f 1 -d ':' | sort -u)) &)
 			clients=""
-			SetWatchdog &
-			pidWatchdog=${!}
+			SetWatchdog
 		fi
 	done
 }
@@ -566,7 +566,6 @@ StartServer() {
 			((OnStop "${msg}" \
 				$(printf '%s\n' ${clientIP} ${clients} | \
 				cut -f 1 -d ':' | sort -u)) &)
-		sleep 2
 	else
 		msg="Err: ${servername} doesn't run"
 		_applog "${msg}"
@@ -575,7 +574,9 @@ StartServer() {
 				$(printf '%s\n' ${clientIP} ${clients} | \
 				cut -f 1 -d ':' | sort -u)) &)
 	fi
-	systemctl --quiet reset-failed "${unit}" 2>> "${devNull}" || :
+	if systemctl list-unit-files --all "${unit}" >> "${devNull}" 2>&1; then
+		systemctl --quiet reset-failed "${unit}" 2>> "${devNull}" || :
+	fi
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
 
