@@ -396,7 +396,7 @@ GetPlaylist() {
 			msg="Warn: ${servername} is stuck. Restarting it"
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
-				((OnStartFail "${msg}" "${clientIP}") &)
+				((OnStartFail "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
 			c=5
 			sleep 2
 		fi
@@ -408,7 +408,7 @@ GetPlaylist() {
 	msg="Info: ${servername} is available"
 	_applog "${msg}"
 	[ -z "${ExitPoints}" ] || \
-		((OnAvail "${msg}" "${clientIP}") &)
+		((OnAvail "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
 	if ! grep -qsF ":${portHttp}/bysid/" "playlist.m3u"; then
 		[ -z "${Debug}" ] || \
 			_applog "Info: adding playlist \"${playlist}\"" \
@@ -475,7 +475,7 @@ WatchConnections() {
 			[ -z "${ExitPoints}" ] || \
 				((OnConnection "${msg1}" \
 					$(printf '%s\n' ${connections} ${clients} | \
-					cut -f 1 -d ':' | sort -u)) &)
+					cut -f 1 -d ':' | sort -u) >> "${devNull}" 2>&1) &)
 			clients="${connections}"
 		elif [ -n "${clients}" ]; then
 			msg="Info: ${servername} All closed:\"$(Hostnames ${clients})\""
@@ -483,7 +483,7 @@ WatchConnections() {
 			[ -z "${ExitPoints}" ] || \
 				((OnConnection "${msg}" \
 					$(printf '%s\n' ${clients} | \
-					cut -f 1 -d ':' | sort -u)) &)
+					cut -f 1 -d ':' | sort -u) >> "${devNull}" 2>&1) &)
 			clients=""
 			SetWatchdog
 		fi
@@ -531,7 +531,7 @@ StartServer() {
 		_applog "${msg}"
 		[ -z "${Debug}" ] || \
 			[ -z "${ExitPoints}" ] || \
-				((OnStart "${msg}" "${clientIP}") &)
+				((OnStart "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
 	fi
 	sleep 2
 	if systemctl --quiet is-active "${unit}"; then
@@ -565,14 +565,14 @@ StartServer() {
 		[ -z "${ExitPoints}" ] || \
 			((OnStop "${msg}" \
 				$(printf '%s\n' ${clientIP} ${clients} | \
-				cut -f 1 -d ':' | sort -u)) &)
+				cut -f 1 -d ':' | sort -u) >> "${devNull}" 2>&1) &)
 	else
 		msg="Err: ${servername} doesn't run"
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
 			((OnStartFail "${msg}" \
 				$(printf '%s\n' ${clientIP} ${clients} | \
-				cut -f 1 -d ':' | sort -u)) &)
+				cut -f 1 -d ':' | sort -u) >> "${devNull}" 2>&1) &)
 	fi
 	if systemctl list-unit-files --all "${unit}" >> "${devNull}" 2>&1; then
 		systemctl --quiet reset-failed "${unit}" 2>> "${devNull}" || :
@@ -607,7 +607,7 @@ SelectAdapter() {
 			_applog "${msg}"
 			[ -z "${Debug}" ] || \
 				[ -z "${ExitPoints}" ] || \
-					((OnSelect "${msg}" "${clientIP}") &)
+					((OnSelect "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
 			return ${OK}
 		}
 		[ -z "${Debug}" ] || \
@@ -619,7 +619,7 @@ SelectAdapter() {
 	msg="Warn: ${portHttp} no more ${dvbtype} cards available"
 	_applog "${msg}"
 	[ -z "${ExitPoints}" ] || \
-		((OnNoCardAvail "${msg}" "${clientIP}") &)
+		((OnNoCardAvail "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
 	return ${ERR}
 }
 
@@ -694,7 +694,7 @@ Main() {
 			msg="Info: $(Hostnames ${clientIP}) requests port ${portHttp}"
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
-				((OnRequest "${msg}" "${clientIP}") &)
+				((OnRequest "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
 			SelectAdapter || \
 				continue
 			Servers="${Servers}${portHttp}:${card}:${tuner} "
@@ -731,7 +731,7 @@ Main() {
 				msg="Status: no servers active"
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
-					((OnStatus "${msg}" "${clientIP}") &)
+					((OnStatus "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
 				continue
 			fi
 			while IFS=":" read portHttp card tuner; do
@@ -748,7 +748,7 @@ Main() {
 				fi
 				_applog "${msg}"
 				[ -z "${ExitPoints}" ] || \
-					((OnStatus "${msg1}" "${clientIP}") &)
+					((OnStatus "${msg1}" "${clientIP}" >> "${devNull}" 2>&1) &)
 			done < <(printf '%s' "${Servers}" | \
 				tr -s ' ' '\n')
 		else
