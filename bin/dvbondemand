@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.24 $
+#  $Revision: 1.25 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -221,7 +221,6 @@ LoadConfig() {
 	[ ! -s "/etc/default/${NAME}" ] || \
 		. "/etc/default/${NAME}"
 
-	let "IdleTimeout+=IdleTimeout%2,1"
 	[ "${Workdir: -1}" = '/' ] || \
 		Workdir="${Workdir}/"
 	mkdir -p "${Workdir}"
@@ -375,13 +374,13 @@ ServerName() {
 
 GetPlaylist() {
 	# global servername clientIP unit playlist stuck
-	local c=5 \
+	local c=4 \
 		msg
 	: > "${playlist}"
 	stuck=""
-	while systemctl --quiet is-active "${unit}" && \
+	while sleep 2;
+	systemctl --quiet is-active "${unit}" && \
 	[ ! -s "${playlist}" ]; do
-		sleep 2
 		if ! wget --quiet -O "${playlist}" \
 		"http://localhost:${portHttp}/playlist.m3u" || \
 		[ $(wc -l < "${playlist}") -le 1 ]; then
@@ -397,7 +396,7 @@ GetPlaylist() {
 			_applog "${msg}"
 			[ -z "${ExitPoints}" ] || \
 				((OnStartFail "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
-			c=5
+			c=4
 			sleep 2
 		fi
 	done

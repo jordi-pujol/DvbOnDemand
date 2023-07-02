@@ -1,3 +1,9 @@
+dvbondemand (1.25) unstable; urgency=medium
+
+  * adjust detection timeout of stuck server
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Sat, 01 Jul 2023 10:14:32 +0200
+
 dvbondemand (1.24) unstable; urgency=medium
 
   * recover errors on transient systemd services
