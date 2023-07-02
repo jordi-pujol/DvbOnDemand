@@ -67,10 +67,6 @@ _datetime() {
 	date +'%F %T' "${@}"
 }
 
-_msg() {
-	msg="${@}"
-}
-
 _applog() {
 	local msg="${@}"
 	printf '%s\n' "$(_datetime) ${msg}" >> "${LOG}"
@@ -553,9 +549,9 @@ StartServer() {
 			wait ${pids} 2>> "${devNull}" || :
 		fi
 		if systemctl --quiet is-active "${unit}"; then
-			_msg "Info: ${servername} is" \
-				"$(test -n "${stuck}" && echo "stuck" || echo "idle")." \
-				"Stopping it"
+			test -n "${stuck}" && \
+				msg="Warn: ${servername} doesn't work. Stopping it" || \
+				msg="Info: ${servername} is idle. Stopping it"
 			systemctl --quiet stop "${unit}" || :
 		else
 			msg="Info: ${servername} has stopped himself"
@@ -601,8 +597,7 @@ SelectAdapter() {
 		eval freqmin=\"\${adapter${adapter}_freqmin:-}\"
 		eval freqmax=\"\${adapter${adapter}_freqmax:-}\"
 		[ ${freqmin} -gt ${freq} -o  ${freq} -gt ${freqmax} ] || {
-			_msg "Info: ${portHttp} selects" \
-				"adapter${card}/frontend${tuner}"
+			msg="Info: ${portHttp} selects adapter${card}/frontend${tuner}"
 			_applog "${msg}"
 			[ -z "${Debug}" ] || \
 				[ -z "${ExitPoints}" ] || \
