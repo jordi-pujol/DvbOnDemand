@@ -1,3 +1,9 @@
+dvbondemand (1.26) unstable; urgency=medium
+
+  * interval timing is done by timeout of the read command
+
+ -- Jordi Pujol Palomer <jordipujolp@gmail.com>  Tue, 04 Jul 2023 10:36:22 +0200
+
 dvbondemand (1.25) unstable; urgency=medium
 
   * adjust detection timeout of stuck server

@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.25 $
+#  $Revision: 1.26 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -36,6 +36,13 @@ shopt -s extglob
 _trim() {
 	printf '%s\n' "${@}" | \
 	sed -re "/^[[:blank:]]+|[[:blank:]]+$/s///g"
+}
+
+_RcInt() {
+	local n
+	for n in $(kill -l "${@}"); do
+		printf '%d\t' $((n+128))
+	done
 }
 
 _lsof() {
@@ -414,41 +421,29 @@ GetPlaylist() {
 	fi
 }
 
-SetWatchdog() {
-	( set +o xtrace
-	c=${IdleTimeout}
-	while systemctl --quiet is-active "${unit}" && \
-	let "c--"; do
-		sleep 1
-	done && \
-		echo "${SERVEREND}" >> "${pipe}" ) &
-	pidWatchdog=${!}
-}
-
-StopWatchdog() {
-	[ -n "${pidWatchdog}" ] || \
-		return ${OK}
-	kill -s TERM ${pidWatchdog} 2>> "${devNull}" || :
-	wait ${pidWatchdog} 2>> "${devNull}" || :
-	pidWatchdog=""
-}
-
 WatchConnections() {
-	# global unit portHttp pidJournal pidWatchdog pipe clients
-	local line client connections msg msg1
+	# global unit portHttp pidJournal pipe clients
+	local sleeping fdPipe \
+		line client connections msg msg1
 	if connections="$(Traffic ${portHttp})"; then
 		echo "CONNECTED" >> "${pipe}"
-		pidWatchdog=""
+		sleeping=10
 	else
-		SetWatchdog
+		sleeping=${IdleTimeout}
 	fi
+	exec {fdPipe}<>"${pipe}"
 	while systemctl --quiet is-active "${unit}"; do
-		read -r line < "${pipe}" || \
-			continue
+		read -t ${sleeping} -r -u "${fdPipe}" line || {
+			[ ${?} -eq $(_RcInt "ALRM") ] || \
+				continue
+			[ -n "${clients}" ] && \
+				line="" || \
+				line="${SERVEREND}"
+		}
 		[ "${line}" != "${SERVEREND}" ] || \
 			return ${OK}
 		if connections="$(Traffic ${portHttp})"; then
-			StopWatchdog
+			sleeping=10
 			[ "${clients}" != "${connections}" ] || \
 				continue
 			msg="Info: ${servername}"
@@ -480,7 +475,7 @@ WatchConnections() {
 					$(printf '%s\n' ${clients} | \
 					cut -f 1 -d ':' | sort -u) >> "${devNull}" 2>&1) &)
 			clients=""
-			SetWatchdog
+			sleeping=${IdleTimeout}
 		fi
 	done
 }
@@ -488,7 +483,7 @@ WatchConnections() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf log_file playlist \
-		pidJournal pidWatchdog pipe pids \
+		pidJournal pipe pids \
 		clients="" unit stuck servername msg
 
 	servername="$(ServerName)"
@@ -543,10 +538,9 @@ StartServer() {
 			RuleInsertClient ${portHttp}
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
-			StopWatchdog
 			pids="${pidJournal} $(_ps_children ${pidJournal})"
 			kill -s TERM ${pids} 2>> "${devNull}" || :
-			wait ${pids} 2>> "${devNull}" || :
+			wait ${pids} >> "${devNull}" 2>&1 || :
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			test -n "${stuck}" && \
@@ -632,7 +626,7 @@ _exit() {
 	pids="$(_ps_children)"
 	[ -z "${pids}" ] || \
 		kill -s TERM ${pids} 2>> "${devNull}" || :
-	wait 2>> "${devNull}" || :
+	wait >> "${devNull}" 2>&1 || :
 	_applog "Daemon exit"
 }
 
