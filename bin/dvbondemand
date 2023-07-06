@@ -434,7 +434,7 @@ WatchConnections() {
 	exec {fdPipe}<>"${pipe}"
 	while systemctl --quiet is-active "${unit}"; do
 		read -t ${sleeping} -r -u "${fdPipe}" line || {
-			[ ${?} -eq $(_RcInt "ALRM") ] || \
+			[ ${?} -eq ${RCALRM} ] || \
 				continue
 			[ -n "${clients}" ] && \
 				line="" || \
@@ -757,8 +757,9 @@ readonly NAME \
 	OK=0 ERR=1 LF=$'\n' TAB=$'\t' NONE=0 \
 	NEWREQUEST="${NAME}New:" \
 	SERVEREND="ServerEnd:" \
-	CLIENTCONNECT="CliConnect:"
-	RELOAD="reloadConfig"
+	CLIENTCONNECT="CliConnect:" \
+	RELOAD="reloadConfig" \
+	RCALRM=$(_RcInt "ALRM")
 # config variables
 declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
 # Main Global variables
