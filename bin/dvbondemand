@@ -427,7 +427,7 @@ WatchConnections() {
 		line client connections msg msg1
 	if connections="$(Traffic ${portHttp})"; then
 		echo "CONNECTED" >> "${pipe}"
-		sleeping=10
+		sleeping=2
 	else
 		sleeping=${IdleTimeout}
 	fi
@@ -439,13 +439,14 @@ WatchConnections() {
 			[ -n "${clients}" ] && \
 				line="" || \
 				line="${SERVEREND}"
+			sleeping=${IdleTimeout}
 		}
 		[ "${line}" != "${SERVEREND}" ] || \
 			return ${OK}
 		if connections="$(Traffic ${portHttp})"; then
-			sleeping=10
 			[ "${clients}" != "${connections}" ] || \
 				continue
+			sleeping=2
 			msg="Info: ${servername}"
 			msg1="${msg}"
 			_applog "${msg}"
