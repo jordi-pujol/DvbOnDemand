@@ -529,7 +529,8 @@ StartServer() {
 			_applog "Info: ${servername} is running"
 		if GetPlaylist; then
 			CreateEmptyPipe "${pipe}"
-			(while :; do
+			( set +o errexit
+			while :; do
 				journalctl --since="@$(_UTCseconds)" \
 				--follow "--grep=${CLIENTCONNECT}${portHttp}" --output=cat  | \
 				cat - >> "${pipe}" || :
@@ -649,7 +650,8 @@ Main() {
 	trap '[ -n "${reloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
 	trap 'echo "ListStatus" >> "${PIPE}"' "${ISTAT}"
 
-	(while :; do
+	( set +o errexit
+	while :; do
 		journalctl --since="@$(_UTCseconds)" \
 		--follow "--grep=${NEWREQUEST}" --output=cat | \
 		cat - >> "${PIPE}" || :
