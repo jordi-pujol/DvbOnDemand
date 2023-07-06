@@ -532,8 +532,8 @@ StartServer() {
 			( set +o errexit
 			while :; do
 				journalctl --since="@$(_UTCseconds)" \
-				--follow "--grep=${CLIENTCONNECT}${portHttp}" --output=cat  | \
-				cat - >> "${pipe}" || :
+				--follow "--grep=${CLIENTCONNECT}${portHttp}" --output=cat \
+				>> "${pipe}"
 			done) &
 			pidJournal=${!}
 			RuleInsertClient ${portHttp}
@@ -653,8 +653,7 @@ Main() {
 	( set +o errexit
 	while :; do
 		journalctl --since="@$(_UTCseconds)" \
-		--follow "--grep=${NEWREQUEST}" --output=cat | \
-		cat - >> "${PIPE}" || :
+		--follow "--grep=${NEWREQUEST}" --output=cat >> "${PIPE}"
 	done) &
 
 	while :; do
