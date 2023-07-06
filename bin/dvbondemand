@@ -439,10 +439,10 @@ WatchConnections() {
 			[ -n "${clients}" ] && \
 				line="" || \
 				line="${SERVEREND}"
-			sleeping=${IdleTimeout}
 		}
 		[ "${line}" != "${SERVEREND}" ] || \
 			return ${OK}
+		sleeping=${IdleTimeout}
 		if connections="$(Traffic ${portHttp})"; then
 			[ "${clients}" != "${connections}" ] || \
 				continue
@@ -476,7 +476,6 @@ WatchConnections() {
 					$(printf '%s\n' ${clients} | \
 					cut -f 1 -d ':' | sort -u) >> "${devNull}" 2>&1) &)
 			clients=""
-			sleeping=${IdleTimeout}
 		fi
 	done
 }
