@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.26 $
+#  $Revision: 1.27 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -435,9 +435,8 @@ WatchConnections() {
 		read -t ${sleeping} -r -u "${fdPipe}" line || {
 			[ ${?} -eq ${RCALRM} ] || \
 				continue
-			[ -n "${clients}" ] && \
-				line="" || \
-				line="${SERVEREND}"
+			[ -n "${clients}" ] || \
+				return ${OK}
 		}
 		[ "${line}" != "${SERVEREND}" ] || \
 			return ${OK}
@@ -560,7 +559,7 @@ StartServer() {
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
 			((OnStartFail "${msg}" \
-				$(printf '%s\n' ${clientIP} ${clients} | \
+				$(printf '%s\n' ${clientIP} | \
 				cut -f 1 -d ':' | sort -u) >> "${devNull}" 2>&1) &)
 	fi
 	if systemctl list-unit-files --all "${unit}" >> "${devNull}" 2>&1; then
