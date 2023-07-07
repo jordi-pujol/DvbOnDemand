@@ -170,8 +170,7 @@ RuleInsertClient() {
 		-m tcp --dport ${portHttp} \
 		-m state --state NEW \
 		-j LOG --log-level info --log-prefix "${CLIENTCONNECT}${portHttp}"
-	[ -z "${Debug}" ] || \
-		_applog "Info: watch client connection port ${portHttp}"
+	_applog "Info: watch client connection port ${portHttp}"
 }
 
 Hostnames() {

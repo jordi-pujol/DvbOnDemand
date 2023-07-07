@@ -7,7 +7,7 @@ buildstamp="debian/debhelper-build-stamp"
 	touch -d '@0' "${buildstamp}"
 
 changed=
-if [ -n "${changed:="$(find . -type f -cnewer "${buildstamp}")"}" ]; then
+if [ -n "${changed:="$(find . -not -path '*/.*' -type f -cnewer "${buildstamp}")"}" ]; then
 	printf '%s\n' "Changed files:" ${changed} ""
 	! debuild -tc || \
 		: > "${buildstamp}"
