@@ -203,6 +203,14 @@ ListStatus() {
 	done
 }
 
+KillProcess() {
+	local pid=${1} \
+		pids
+	pids="${pid} $(_ps_children ${pid})"
+	kill -s TERM ${pids} 2>> "${devNull}" || :
+	wait ${pid} 2>> "${devNull}" || :
+}
+
 LoadConfig() {
 	local name data conffile line ind \
 		card tuner dvbtype item service_id adapterTypes \
@@ -228,7 +236,16 @@ LoadConfig() {
 	mkdir -p "${Workdir}"
 	cd "${Workdir}"
 	rm -f *.{conf,m3u,log} {0..9}* "${STAT}" 2> /dev/null
+
+	[ -z "${pidJournal:-}" ] || \
+		KillProcess ${pidJournal}
 	CreateEmptyPipe "${PIPE}"
+	( set +o errexit
+	while :; do
+		journalctl --since="@$(_UTCseconds)" \
+		--follow "--grep=${NEWREQUEST}" --output=cat >> "${PIPE}"
+	done) &
+	pidJournal="${!}"
 
 	adapterTypes=""
 	Adapters=${NONE}
@@ -537,9 +554,7 @@ StartServer() {
 			RuleInsertClient ${portHttp}
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
-			pids="${pidJournal} $(_ps_children ${pidJournal})"
-			kill -s TERM ${pids} 2>> "${devNull}" || :
-			wait ${pids} >> "${devNull}" 2>&1 || :
+			KillProcess ${pidJournal}
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			test -n "${stuck}" && \
@@ -632,7 +647,7 @@ _exit() {
 Main() {
 	# internal variables, daemon scope
 	local reloadConfig line portHttp config card tuner dvbtype clientIP \
-		clients msg msg1 devNull
+		pidJournal clients msg msg1 devNull
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -647,12 +662,6 @@ Main() {
 
 	trap '[ -n "${reloadConfig}" ] || echo "${RELOAD}" >> "${PIPE}"' "${IRELOAD}"
 	trap 'echo "ListStatus" >> "${PIPE}"' "${ISTAT}"
-
-	( set +o errexit
-	while :; do
-		journalctl --since="@$(_UTCseconds)" \
-		--follow "--grep=${NEWREQUEST}" --output=cat >> "${PIPE}"
-	done) &
 
 	while :; do
 		read -r line < "${PIPE}" || {
