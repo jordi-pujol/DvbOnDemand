@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.27 $
+#  $Revision: 1.28 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -30,7 +30,7 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #************************************************************************
 
-set -o errexit -o nounset -o pipefail +o noglob +o noclobber
+set -o errexit -o nounset -o pipefail +o noglob +o noclobber +o monitor
 shopt -s extglob
 
 _trim() {
@@ -39,10 +39,8 @@ _trim() {
 }
 
 _RcInt() {
-	local n
-	for n in $(kill -l "${@}"); do
-		printf '%d\t' $((n+128))
-	done
+	kill -l "${@}" | \
+		awk '{printf "%d\t", $1+128}'
 }
 
 _lsof() {
@@ -203,14 +201,6 @@ ListStatus() {
 	done
 }
 
-KillProcess() {
-	local pid=${1} \
-		pids
-	pids="${pid} $(_ps_children ${pid})"
-	kill -s TERM ${pids} 2>> "${devNull}" || :
-	wait ${pid} 2>> "${devNull}" || :
-}
-
 LoadConfig() {
 	local name data conffile line ind \
 		card tuner dvbtype item service_id adapterTypes \
@@ -237,15 +227,17 @@ LoadConfig() {
 	cd "${Workdir}"
 	rm -f *.{conf,m3u,log} {0..9}* "${STAT}" 2> /dev/null
 
-	[ -z "${pidJournal:-}" ] || \
-		KillProcess ${pidJournal}
+	[ -z "${pidJournal}" ] || \
+		kill -- -${pidJournal}
 	CreateEmptyPipe "${PIPE}"
+	set -o monitor
 	( set +o errexit
 	while :; do
 		journalctl --since="@$(_UTCseconds)" \
 		--follow "--grep=${NEWREQUEST}" --output=cat >> "${PIPE}"
 	done) &
 	pidJournal="${!}"
+	set +o monitor
 
 	adapterTypes=""
 	Adapters=${NONE}
@@ -544,6 +536,7 @@ StartServer() {
 			_applog "Info: ${servername} is running"
 		if GetPlaylist; then
 			CreateEmptyPipe "${pipe}"
+			set -o monitor
 			( set +o errexit
 			while :; do
 				journalctl --since="@$(_UTCseconds)" \
@@ -551,10 +544,11 @@ StartServer() {
 				>> "${pipe}"
 			done) &
 			pidJournal=${!}
+			set +o monitor
 			RuleInsertClient ${portHttp}
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
-			KillProcess ${pidJournal}
+			kill -- -${pidJournal}
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			test -n "${stuck}" && \
@@ -647,7 +641,7 @@ _exit() {
 Main() {
 	# internal variables, daemon scope
 	local reloadConfig line portHttp config card tuner dvbtype clientIP \
-		pidJournal clients msg msg1 devNull
+		pidJournal="" clients msg msg1 devNull
 
 	trap '_exit' EXIT
 	trap 'exit' INT
