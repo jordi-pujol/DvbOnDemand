@@ -228,7 +228,7 @@ LoadConfig() {
 	rm -f *.{conf,m3u,log} {0..9}* "${STAT}" 2> /dev/null
 
 	[ -z "${pidJournal}" ] || \
-		kill -- -${pidJournal}
+		kill -s TERM -- -${pidJournal}
 	CreateEmptyPipe "${PIPE}"
 	set -o monitor
 	( set +o errexit
@@ -439,7 +439,7 @@ WatchConnections() {
 	else
 		sleeping=${IdleTimeout}
 	fi
-	exec {fdPipe}<>"${pipe}"
+	exec {fdPipe}<> "${pipe}"
 	while systemctl --quiet is-active "${unit}"; do
 		read -t ${sleeping} -r -u "${fdPipe}" line || {
 			[ ${?} -eq ${RCALRM} ] || \
@@ -548,7 +548,7 @@ StartServer() {
 			RuleInsertClient ${portHttp}
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
-			kill -- -${pidJournal}
+			kill -s TERM -- -${pidJournal}
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			test -n "${stuck}" && \
@@ -567,9 +567,7 @@ StartServer() {
 		msg="Err: ${servername} doesn't run"
 		_applog "${msg}"
 		[ -z "${ExitPoints}" ] || \
-			((OnStartFail "${msg}" \
-				$(printf '%s\n' ${clientIP} | \
-				cut -f 1 -d ':' | sort -u) >> "${devNull}" 2>&1) &)
+			((OnStartFail "${msg}" "${clientIP}" >> "${devNull}" 2>&1) &)
 	fi
 	if systemctl list-unit-files --all "${unit}" >> "${devNull}" 2>&1; then
 		systemctl --quiet reset-failed "${unit}" 2>> "${devNull}" || :
