@@ -793,7 +793,7 @@ status)
 	let "c--"; do
 		:
 	done
-	if [ ${c} -le 0 ]; then
+	if [ $(_UTCseconds -r "${STAT}") -eq ${d} ]; then
 		echo "Err: Error when updating status file" >&2
 		exit ${ERR}
 	fi
