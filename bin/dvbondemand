@@ -11,7 +11,7 @@
 #  In few seconds clients will get the corresponding http video/audio stream.
 #  Also, ends the mumudvb server session after client disconnection.
 #
-#  $Revision: 1.29 $
+#  $Revision: 1.30 $
 #
 #  Copyright (C) 2023-2023 Jordi Pujol <jordipujolp AT gmail DOT com>
 #
@@ -229,7 +229,7 @@ LoadConfig() {
 
 	[ -z "${pidJournal}" ] || {
 		kill -s TERM -- -${pidJournal}
-		wait ${pidJournal} >> "${devNull}" 2>&1 || :
+		wait ${pidJournal} 2>> "${devNull}" || :
 	}
 	CreateEmptyPipe "${PIPE}"
 	set -o monitor
@@ -551,7 +551,7 @@ StartServer() {
 			WatchConnections
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
 			kill -s TERM -- -${pidJournal}
-			wait ${pidJournal} >> "${devNull}" 2>&1 || :
+			wait ${pidJournal} 2>> "${devNull}" || :
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			test -n "${stuck}" && \
@@ -635,14 +635,14 @@ _exit() {
 	pids="$(_ps_children)"
 	[ -z "${pids}" ] || \
 		kill -s TERM ${pids} 2>> "${devNull}" || :
-	wait >> "${devNull}" 2>&1 || :
+	wait 2>> "${devNull}" || :
 	_applog "Daemon exit"
 }
 
 Main() {
 	# internal variables, daemon scope
 	local reloadConfig line portHttp config card tuner dvbtype clientIP \
-		pidJournal="" clients msg msg1 devNull
+		pidJournal="" clients msg msg1
 
 	trap '_exit' EXIT
 	trap 'exit' INT
@@ -766,7 +766,7 @@ readonly NAME \
 # config variables
 declare Workdir Debug PortHttp LogRotate IdleTimeout Blacklist
 # Main Global variables
-declare Adapters Configs Servers="" ExitPoints=""
+declare Adapters Configs Servers="" ExitPoints="" devNull="/dev/null"
 
 case "${1:-}" in
 start)
