@@ -432,16 +432,15 @@ GetPlaylist() {
 }
 
 WatchConnections() {
-	# global unit portHttp pidJournal pipe clients
-	local sleeping fdPipe \
+	# global unit portHttp pidJournal pipe fdPipe clients
+	local sleeping \
 		line client connections msg msg1
 	if connections="$(Traffic ${portHttp})"; then
-		echo "CONNECTED" >> "${pipe}"
+		echo "CONNECTED" >&${fdPipe}
 		sleeping=2
 	else
 		sleeping=${IdleTimeout}
 	fi
-	exec {fdPipe}<> "${pipe}"
 	while systemctl --quiet is-active "${unit}"; do
 		read -t ${sleeping} -r -u "${fdPipe}" line || {
 			[ ${?} -eq ${RCALRM} ] || \
@@ -492,7 +491,7 @@ WatchConnections() {
 StartServer() {
 	# global config portHttp card tuner dvbtype clientIP
 	local conffile tmpconf log_file playlist \
-		pidJournal pipe pids \
+		pidJournal pipe fdPipe pids \
 		clients="" unit stuck servername msg
 
 	servername="$(ServerName)"
@@ -512,7 +511,6 @@ StartServer() {
 		systemctl --quiet reset-failed "${unit}" 2>> "${devNull}" || :
 	fi
 	pipe="${portHttp}-pipe"
-	CreateEmptyPipe "${pipe}"
 	chown _mumudvb:video "${log_file}"
 	if systemd-run --quiet \
 	--working-directory="${Workdir}" \
@@ -538,12 +536,13 @@ StartServer() {
 			_applog "Info: ${servername} is running"
 		if GetPlaylist; then
 			CreateEmptyPipe "${pipe}"
+			exec {fdPipe}<> "${pipe}"
 			set -o monitor
 			( set +o errexit
 			while :; do
 				journalctl --since="@$(_UTCseconds)" \
 				--follow "--grep=${CLIENTCONNECT}${portHttp}" --output=cat \
-				>> "${pipe}"
+				>&${fdPipe}
 			done) &
 			pidJournal=${!}
 			set +o monitor
@@ -552,6 +551,8 @@ StartServer() {
 			RuleClean ${portHttp} "${CLIENTCONNECT}${portHttp}"
 			kill -s TERM -- -${pidJournal}
 			wait ${pidJournal} 2>> "${devNull}" || :
+			eval exec "${fdPipe}>&-"
+			rm -f "${pipe}"
 		fi
 		if systemctl --quiet is-active "${unit}"; then
 			test -n "${stuck}" && \
