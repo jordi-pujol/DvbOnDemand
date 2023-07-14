@@ -576,6 +576,7 @@ StartServer() {
 	if systemctl list-unit-files --all "${unit}" >> "${devNull}" 2>&1; then
 		systemctl --quiet reset-failed "${unit}" 2>> "${devNull}" || :
 	fi
+	rm -f "${pipe}"
 	echo "${SERVEREND}${portHttp}" >> "${PIPE}"
 }
 
